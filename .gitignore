@@ -1,0 +1,33 @@
+# ---- Gradle / Kotlin 构建产物 ----
+.gradle/
+.kotlin/
+build/
+app/build/
+*.hprof
+
+# ---- 本机配置（含绝对路径，不进仓库）----
+local.properties
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ---- 系统垃圾 ----
+.DS_Store
+Thumbs.db
+*.log
+
+# ---- CodeGraph 索引（可随时 codegraph index 重建）----
+.codegraph/
+
+# ---- 签名证书（含私钥，绝不入库）----
+*.keystore
+*.jks
+
+# 签名密码写在 local.properties（已被上面忽略），app/build.gradle.kts 从那里读。
+# 没有 keystore 时 release 包会自动退回 debug 签名，不影响他人构建。

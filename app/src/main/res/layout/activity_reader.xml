@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#101317">
+
+    <com.kpa.reader.ui.PageView
+        android:id="@+id/pageView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
+
+    <ProgressBar
+        android:id="@+id/loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminateTint="#D9A441"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/menuOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:background="#141820"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp">
+
+            <TextView
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:background="@drawable/bg_tool_btn"
+                android:gravity="center"
+                android:text="返回"
+                android:textColor="#E8E4DA"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvBookTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="#E8E4DA"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/tvChapterTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="#8A94A0"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvPercent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:textColor="#D9A441"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <View
+            android:id="@+id/menuScrim"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#66000000" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:background="#141820"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="6dp">
+
+            <TextView
+                android:id="@+id/btnToc"
+                style="@style/ToolButton"
+                android:text="目录" />
+
+            <TextView
+                android:id="@+id/btnSearch"
+                style="@style/ToolButton"
+                android:text="搜索" />
+
+            <TextView
+                android:id="@+id/btnBookmark"
+                style="@style/ToolButton"
+                android:text="书签" />
+
+            <TextView
+                android:id="@+id/btnFontDown"
+                style="@style/ToolButton"
+                android:text="A-" />
+
+            <TextView
+                android:id="@+id/btnFontUp"
+                style="@style/ToolButton"
+                android:text="A+" />
+
+            <TextView
+                android:id="@+id/btnTheme"
+                style="@style/ToolButton"
+                android:text="纸白" />
+
+            <TextView
+                android:id="@+id/btnNight"
+                style="@style/ToolButton"
+                android:text="昼夜" />
+
+            <TextView
+                android:id="@+id/btnSettings"
+                style="@style/ToolButton"
+                android:text="设置" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 全文搜索覆盖层：放在 Activity 里而不是 Dialog，
+         才能随软键盘 adjustResize 自动压缩 -->
+    <LinearLayout
+        android:id="@+id/searchOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF141820"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <ListView
+            android:id="@+id/searchList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="#2A3038"
+            android:dividerHeight="1dp" />
+
+        <TextView
+            android:id="@+id/searchStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="4dp"
+            android:textColor="#8A94A0"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/searchInput"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:background="#FF232B35"
+            android:hint="输入关键词，边打边搜"
+            android:paddingHorizontal="12dp"
+            android:singleLine="true"
+            android:textColor="#E8E4DA"
+            android:textColorHint="#6B7683"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+</FrameLayout>
