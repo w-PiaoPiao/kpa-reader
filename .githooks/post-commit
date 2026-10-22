@@ -1,0 +1,15 @@
+#!/bin/sh
+# git ↔ codegraph 联动：每次提交后增量更新代码图谱
+# 静默后台执行，失败绝不影响提交
+# 排错看 .git/codegraph-sync.log
+
+[ -d .codegraph ] || exit 0
+command -v codegraph >/dev/null 2>&1 || exit 0
+
+LOG=.git/codegraph-sync.log
+printf '\n=== %s  sync after %s ===\n' "$(date '+%Y-%m-%d %H:%M:%S')" \
+    "$(git rev-parse --short HEAD 2>/dev/null)" >>"$LOG" 2>&1
+
+( codegraph sync >>"$LOG" 2>&1 & ) >/dev/null 2>&1
+
+exit 0

@@ -1,0 +1,16 @@
+#!/bin/sh
+# 护栏：拦截不该进仓库的构建产物与本机配置
+# 绕过方式：git commit --no-verify
+
+blocked=$(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '(^|/)(local\.properties|build/|\.gradle/|\.kotlin/|\.codegraph/)|\.(apk|aab|class|hprof)$' \
+    || true)
+
+if [ -n "$blocked" ]; then
+    printf '\n✗ 以下文件不该入库（构建产物 / 本机配置）：\n\n' >&2
+    printf '%s\n' "$blocked" | sed 's/^/    /' >&2
+    printf '\n  如确需提交，请用 git commit --no-verify\n\n' >&2
+    exit 1
+fi
+
+exit 0
