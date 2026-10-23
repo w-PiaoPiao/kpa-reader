@@ -22,8 +22,8 @@ android {
         applicationId = "com.kpa.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.6"
+        versionCode = 10600
+        versionName = "1.6.0"
     }
 
     signingConfigs {

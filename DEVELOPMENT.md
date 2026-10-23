@@ -31,7 +31,7 @@
 ```bash
 ./build.sh                      # 构建签名 release APK
 ./build.sh debug                # 构建 debug APK
-gradle :app:testDebugUnitTest   # 跑单元测试（24 个）
+gradle :app:testDebugUnitTest   # 跑单元测试（35 个）
 ```
 
 提交：
@@ -42,6 +42,52 @@ git commit -m "feat: 说明做了什么"
 ```
 
 **提交信息前缀**：`feat:` 新功能 / `fix:` 修 bug / `perf:` 性能 / `refactor:` 重构 / `docs:` 文档 / `chore:` 杂务 / `test:` 测试。
+
+---
+
+## 版本号规则（x.y.z）
+
+格式固定三段，每段谁能动是**硬约定**：
+
+| 段 | 何时 +1 | 谁决定 |
+|---|---|---|
+| **x**（第一位） | 只有用户明确要求时 | 用户 |
+| **y**（第二位） | 在 GitHub 上发布 release，或用户明确要求时 | 用户 / 发版 |
+| **z**（第三位） | 影响 App 行为的代码改动 | AI 判断，自动升 |
+
+### 具体怎么走
+
+- **日常开发只升 z**。修 bug、加功能、改按键映射、调整 UI —— 统统 `z + 1`，不动 y。
+- **纯文档改动不升版本**。README、注释、截图、`.workbuddy/memory/` 的更新不碰版本号，
+  否则版本号会通胀得毫无意义。判据：**有没有改动 `app/src/` 下的代码**。
+- **发 release 时 y + 1、z 归零**。命令示意：
+
+  ```bash
+  # 先把 build.gradle.kts 改成 1.7.0 / versionCode 10700
+  git commit -am "chore: 版本 1.7.0"
+  git push
+  gh release create v1.7.0 --title "1.7.0" --notes "..."
+  ```
+
+- **x 永远等用户开口**。哪怕改动再大（缓存格式变更、按键体系重构），也只升 z，
+  等用户说"升一位"再动。
+
+### versionCode 跟着版本号走
+
+Android 要求 `versionCode` 是单调递增整数，用固定公式对齐，便于反查：
+
+```
+versionCode = major × 10000 + minor × 100 + patch
+```
+
+例：`1.6.0 → 10600`、`1.6.1 → 10601`、`1.7.0 → 10700`。
+
+改版本号的位置只有一处 —— `app/build.gradle.kts` 的 `defaultConfig`：
+
+```kotlin
+versionCode = 10600
+versionName = "1.6.0"
+```
 
 ---
 
