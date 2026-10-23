@@ -23,6 +23,7 @@ object Gamepad {
         TOGGLE_TOC,
         FIND,
         ADD_BOOKMARK,
+        SHOW_BOOKMARKS,
         TOGGLE_MENU,
         TOGGLE_NIGHT,
         FONT_DOWN,
@@ -31,10 +32,9 @@ object Gamepad {
     }
 
     fun actionOf(keyCode: Int): Action? = when (keyCode) {
-        // 翻页：十字键左右 / L1 / R1 / 翻页键
+        // 翻页：十字键左右 / R1 / 翻页键（L1 已改为加书签，上一页靠十字键）
         KeyEvent.KEYCODE_DPAD_LEFT,
         KeyEvent.KEYCODE_DPAD_UP,
-        KeyEvent.KEYCODE_BUTTON_L1,
         KeyEvent.KEYCODE_PAGE_UP -> Action.PREV_PAGE
 
         KeyEvent.KEYCODE_DPAD_RIGHT,
@@ -46,11 +46,13 @@ object Gamepad {
         KeyEvent.KEYCODE_ENTER,
         KeyEvent.KEYCODE_DPAD_CENTER -> Action.NEXT_PAGE
 
-        // 章
-        KeyEvent.KEYCODE_BUTTON_L2 -> Action.PREV_CHAPTER
+        // 章：R2 下一章；上一章没有专属键，翻到章首再按下页即可跨章，
+        // 或者从目录（X）直接跳
         KeyEvent.KEYCODE_BUTTON_R2 -> Action.NEXT_CHAPTER
 
         // 功能
+        KeyEvent.KEYCODE_BUTTON_L1 -> Action.ADD_BOOKMARK
+        KeyEvent.KEYCODE_BUTTON_L2 -> Action.SHOW_BOOKMARKS
         KeyEvent.KEYCODE_BUTTON_X -> Action.TOGGLE_TOC
         KeyEvent.KEYCODE_BUTTON_Y,
         KeyEvent.KEYCODE_F -> Action.FIND
@@ -102,11 +104,12 @@ object Gamepad {
     val HELP_LINES: List<Pair<String, String>> = listOf(
         "十字键 ← → / ↑ ↓" to "上一页 / 下一页",
         "A / R1" to "下一页",
-        "L1" to "上一页",
-        "L2 / R2" to "上一章 / 下一章",
+        "R2" to "下一章",
+        "L1" to "加书签",
+        "L2" to "书签列表",
         "X" to "目录",
         "Y" to "全文搜索",
-        "START" to "菜单（书签、跳转、字号、主题）",
+        "START" to "菜单（跳转、字号、主题、设置）",
         "SELECT" to "夜间模式",
         "B" to "后退（连按两次返回书架）",
         "触摸" to "左/右侧点击翻页，中间呼出菜单"

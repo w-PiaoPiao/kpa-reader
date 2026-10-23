@@ -96,6 +96,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private var lastKeyAt = 0L
     private val lastActionAt = HashMap<Gamepad.Action, Long>()
     private var lastBackPressAt = 0L
+    private var lastClearBookmarksAt = 0L
     private var savedOffset = -1
 
     private lateinit var searchOverlay: View
@@ -568,11 +569,20 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         val marks = b.bookmarks
         val labels = marks.map { it.preview.ifEmpty { "（空）" } }.toTypedArray()
         showListDialog("书签（${marks.size}）", labels, "全部清除", {
-            book?.let { cur ->
-                store.upsert(cur.copy(bookmarks = emptyList()))
-                book = store.find(cur.id)
+            // 手柄的焦点从列表按到底很容易滑到「全部清除」上，误按一次就全没了。
+            // 所以第一次只提示，2.5 秒内再按一次才真的清空
+            val now = SystemClock.uptimeMillis()
+            if (now - lastClearBookmarksAt > 2500L) {
+                lastClearBookmarksAt = now
+                toast("再按一次「全部清除」确认")
+            } else {
+                lastClearBookmarksAt = 0L
+                book?.let { cur ->
+                    store.upsert(cur.copy(bookmarks = emptyList()))
+                    book = store.find(cur.id)
+                }
+                toast("已清空书签")
             }
-            toast("已清空书签")
         }) { which ->
             val off = marks[which].offset
             val idx = ChapterSplitter.chapterIndexAt(chapters, off)
@@ -878,11 +888,60 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             cornerRadius = 12 * dm.density
             setColor(0xFF1B2129.toInt())
         })
+        // ListView 自己接 A：焦点在列表上时，Dialog 那层的 OnKeyListener 收不到（被 View 树先处理）
+        list.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN &&
+                (keyCode == KeyEvent.KEYCODE_BUTTON_A || keyCode == KeyEvent.KEYCODE_DPAD_CENTER)
+            ) {
+                val pos = list.selectedItemPosition
+                if (pos in items.indices) {
+                    onPick(pos)
+                    dlg.dismiss()
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
+        // 手柄 A 不是 ENTER，ListView 不认：焦点在列表上就当成"选中当前项"，
+        // 焦点在按钮上就点击按钮。目录、书签两个弹窗都走这里
+        dlg.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN &&
+                (keyCode == KeyEvent.KEYCODE_BUTTON_A ||
+                    keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    keyCode == KeyEvent.KEYCODE_ENTER)
+            ) {
+                val focused = dlg.window?.decorView?.findFocus()
+                when {
+                    // hasFocus() 比 findFocus() 实例比对可靠：焦点可能落在列表的子树里
+                    list.hasFocus() -> {
+                        val pos = list.selectedItemPosition
+                        if (pos in items.indices) {
+                            onPick(pos)
+                            dlg.dismiss()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    focused != null && focused !== dlg.window?.decorView -> {
+                        focused.performClick(); true
+                    }
+                    else -> false
+                }
+            } else {
+                false
+            }
+        }
         list.setOnItemClickListener { _, _, pos, _ ->
             onPick(pos)
             dlg.dismiss()
         }
         dlg.show()
+        // 焦点给列表：手柄一进来就是上下选，不用先摸方向键探路
+        list.requestFocus()
         if (initialSelection >= 0) {
             // 目录打开时直接定位到当前章，几百章的书不用手动翻
             list.setSelection((initialSelection - 2).coerceAtLeast(0))
@@ -964,6 +1023,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             Gamepad.Action.TOGGLE_TOC -> showToc()
             Gamepad.Action.FIND -> showSearch()
             Gamepad.Action.ADD_BOOKMARK -> addBookmark()
+            Gamepad.Action.SHOW_BOOKMARKS -> showBookmarks()
             Gamepad.Action.TOGGLE_MENU -> toggleMenu()
             Gamepad.Action.TOGGLE_NIGHT -> toggleNight()
             Gamepad.Action.FONT_DOWN -> changeFont(-1f)
