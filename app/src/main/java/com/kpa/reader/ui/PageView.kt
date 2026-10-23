@@ -106,6 +106,9 @@ class PageView @JvmOverloads constructor(
     /** 分页还没完成时的临时位置，保证进度计算不跳变 */
     private var pendingChar = -1
 
+    /** 本次排版完成后是否要跳到最后一页（往回翻跨章时用） */
+    private var pendingLastPage = false
+
     var overallPercent: Float = 0f
         set(value) {
             if (field != value) { field = value; invalidate() }
@@ -144,7 +147,13 @@ class PageView @JvmOverloads constructor(
         bitmapCache.evictAll()
     }
 
-    fun setChapter(blockStart: Int, blockEnd: Int, label: String, absoluteChar: Int) {
+    /**
+     * [lastPage] 为真时定位到本章**最后一页**（从章首整章排一遍再取末页）。
+     *
+     * 上一章不能简单用「上一章最后一个字符」当起点：那样分页只会从末尾那个字开始排，
+     * 整页几乎全空。往回翻变空白就是这么来的。
+     */
+    fun setChapter(blockStart: Int, blockEnd: Int, label: String, absoluteChar: Int, lastPage: Boolean = false) {
         chapterStart = blockStart.coerceAtLeast(0)
         chapterEnd = blockEnd.coerceAtLeast(chapterStart)
         chapterLabel = label
@@ -153,6 +162,7 @@ class PageView @JvmOverloads constructor(
         renderedText = emptyList()
         renderedImages = emptyList()
         ghost?.recycle(); ghost = null; ghostAlpha = 1f; ghostX = 0f
+        pendingLastPage = lastPage
         rebuildEngine()
         relayout(absoluteChar)
     }
@@ -185,17 +195,28 @@ class PageView @JvmOverloads constructor(
         }
         val e = engine ?: run { rebuildEngine(); engine } ?: return
 
+        // 要显示最后一页时必须从章首整章排，否则起点在章末只会排出近乎空白的一页
+        val toLastPage = pendingLastPage
+        pendingLastPage = false
+
         pendingChar = absoluteChar
-        val startBlock = d.blockIndexAtChar(absoluteChar.coerceAtLeast(0))
-            .coerceIn(chapterStart, (chapterEnd - 1).coerceAtLeast(chapterStart))
-        val startChar = (absoluteChar - blocks[startBlock].start).coerceAtLeast(0)
+        val startBlock: Int
+        val startChar: Int
+        if (toLastPage) {
+            startBlock = chapterStart
+            startChar = 0
+        } else {
+            startBlock = d.blockIndexAtChar(absoluteChar.coerceAtLeast(0))
+                .coerceIn(chapterStart, (chapterEnd - 1).coerceAtLeast(chapterStart))
+            startChar = (absoluteChar - blocks[startBlock].start).coerceAtLeast(0)
+        }
 
         layoutJob?.cancel()
         val sc = scope
         if (sc == null) {
             // 没有注入 scope 时退回同步，保证极端情况下仍可用
             pages = e.paginateRange(blocks, startBlock, startChar, chapterEnd)
-            pageIndex = 0
+            pageIndex = if (toLastPage) (pages.size - 1).coerceAtLeast(0) else 0
             pendingChar = -1
             buildPage()
             invalidate()
@@ -209,7 +230,7 @@ class PageView @JvmOverloads constructor(
                 e.paginateRange(blocks, startBlock, startChar, chapterEnd)
             }
             pages = result
-            pageIndex = 0
+            pageIndex = if (toLastPage) (result.size - 1).coerceAtLeast(0) else 0
             pendingChar = -1
             buildPage()
             invalidate()

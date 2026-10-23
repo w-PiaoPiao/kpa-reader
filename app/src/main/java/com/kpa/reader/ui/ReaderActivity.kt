@@ -26,6 +26,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -62,6 +63,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     companion object {
         const val EXTRA_ID = "book_id"
         const val EXTRA_SEARCH = "search_query"
+
+        /** 后退双击验证的时间窗：2 秒内再按一次才退回书架 */
+        private const val EXIT_CONFIRM_MS = 2000L
+
         fun intentOf(context: Context, bookId: String, searchQuery: String? = null): Intent {
             val i = Intent(context, ReaderActivity::class.java).putExtra(EXTRA_ID, bookId)
             if (!searchQuery.isNullOrBlank()) i.putExtra(EXTRA_SEARCH, searchQuery)
@@ -90,6 +95,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private var lastKeyAt = 0L
     private val lastActionAt = HashMap<Gamepad.Action, Long>()
+    private var lastBackPressAt = 0L
     private var savedOffset = -1
 
     private lateinit var searchOverlay: View
@@ -157,8 +163,14 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private fun setMenuVisible(visible: Boolean) {
         menuOverlay.visibility = if (visible) View.VISIBLE else View.GONE
         if (visible) {
+            // 阅读区在 touch mode 下会一直占着焦点，菜单打开时必须让出，
+            // 否则十字键的导航起点还在 PageView 上，菜单按钮选不中
+            pageView.isFocusable = false
+            pageView.isFocusableInTouchMode = false
             menuOverlay.findViewById<View>(R.id.btnToc)?.requestFocus()
         } else {
+            pageView.isFocusable = true
+            pageView.isFocusableInTouchMode = true
             pageView.requestFocus()
         }
     }
@@ -216,7 +228,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
     // ---------------- 章节 ----------------
 
-    private fun openChapter(index: Int, absoluteChar: Int, record: Boolean = true) {
+    private fun openChapter(
+        index: Int,
+        absoluteChar: Int,
+        record: Boolean = true,
+        lastPage: Boolean = false
+    ) {
         val doc = document ?: return
         if (chapters.isEmpty() || doc.blocks.isEmpty()) return
         chapterIndex = index.coerceIn(0, chapters.size - 1)
@@ -237,7 +254,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         val target = absoluteChar.coerceIn(ch.start, maxOf(ch.start, ch.end - 1))
 
         pageView.configure(settings, book?.title ?: "")
-        pageView.setChapter(bStart, bEnd, ch.title, target)
+        pageView.setChapter(bStart, bEnd, ch.title, target, lastPage)
         pageView.overallPercent = progressOf(target)
         updateHeader()
         if (record) scheduleSave()
@@ -302,7 +319,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         } else {
             if (chapterIndex - 1 >= 0) {
                 val prev = chapters[chapterIndex - 1]
-                openChapter(chapterIndex - 1, maxOf(prev.start, prev.end - 1))
+                // 直接落到上一章的最后一页；用 prev.end-1 当起点只会排出近乎空白的一页
+                openChapter(
+                    chapterIndex - 1,
+                    maxOf(prev.start, prev.end - 1),
+                    lastPage = true
+                )
                 true
             } else {
                 toast("已经是第一章了")
@@ -565,28 +587,27 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         val d = dm.density
         val pad = (16 * d).toInt()
 
-        // 横屏宽度够，排成两列：左列排版参数、右列开关与跳转，
-        // 单列的话 640 高放不下全部设置项，最下面两项会被裁掉
+        // 单列排布：手柄的左右键要留给滑块调值、开关切换，
+        // 一旦分成两列，右列就永远到不了（左右键被滑块吃掉了）。
+        // 高度靠 ScrollView 兜底，字号调大也不会把最后几项裁掉。
         val root = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+            orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val right = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((24 * d).toInt(), 0, 0, 0)
-        }
-        root.addView(left, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        root.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        val left = root
+        val right = root
 
         fun title(parent: LinearLayout, t: String) {
             parent.addView(TextView(this).apply {
                 text = t
                 setTextColor(0xFFD9A441.toInt())
                 textSize = 12f
-                setPadding(0, (10 * d).toInt(), 0, (6 * d).toInt())
+                setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
             })
         }
+
+        // 记住第一个可聚焦控件，面板弹出时把焦点给它，手柄一进来就能直接调
+        var firstFocusable: View? = null
 
         fun slider(parent: LinearLayout, label: String, min: Int, max: Int, value: Int,
                    suffix: String, onCommit: (Int) -> Unit) {
@@ -602,6 +623,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             val sb = SeekBar(this).apply {
                 this.max = (max - min).coerceAtLeast(1)
                 progress = (value - min).coerceIn(0, max - min)
+                isFocusable = true
+                isFocusableInTouchMode = true
             }
             var latest = value
             sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -613,6 +636,25 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 // 只在松手时应用：拖动过程中反复重排会很卡
                 override fun onStopTrackingTouch(s: SeekBar?) { onCommit(latest) }
             })
+            // 手柄左右键：SeekBar 自己会挪进度，但**不会**回调 onStopTrackingTouch，
+            // 不在这里提交的话只有标签在变、设置其实没生效
+            sb.setOnKeyListener { _, keyCode, event ->
+                if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                val step = when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> -1
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> 1
+                    else -> return@setOnKeyListener false
+                }
+                val np = (sb.progress + step).coerceIn(0, sb.max)
+                if (np == sb.progress) return@setOnKeyListener true
+                sb.progress = np
+                onCommit(np + min)
+                true
+            }
+            sb.setOnFocusChangeListener { v, hasFocus ->
+                v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+            }
+            if (firstFocusable == null) firstFocusable = sb
             row.addView(tv, LinearLayout.LayoutParams((96 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
             row.addView(sb, LinearLayout.LayoutParams(0, (30 * d).toInt(), 1f))
             parent.addView(row)
@@ -624,12 +666,29 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 text = "$label：" + if (state) "开" else "关"
                 setTextColor(0xFFE2E7EE.toInt())
                 textSize = 12f
-                setPadding(0, (6 * d).toInt(), 0, (6 * d).toInt())
+                setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt())
                 isClickable = true
+                isFocusable = true
+                isFocusableInTouchMode = true
                 setOnClickListener {
                     state = !state
                     text = "$label：" + if (state) "开" else "关"
                     onChange(state)
+                }
+                setOnFocusChangeListener { v, hasFocus ->
+                    v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+                }
+                // 手柄 A 在系统里不是 ENTER，Dialog 里也没人帮忙转成点击，得自己处理
+                setOnKeyListener { _, keyCode, event ->
+                    if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            performClick(); true
+                        }
+                        else -> false
+                    }
                 }
             }
             parent.addView(tv)
@@ -670,6 +729,11 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         val jumpSb = SeekBar(this).apply {
             max = 1000
             progress = (pageView.overallPercent * 1000).toInt().coerceIn(0, 1000)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnFocusChangeListener { v, hasFocus ->
+                v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+            }
         }
         jumpSb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { jumpTv.text = "${p / 10}%" }
@@ -681,6 +745,24 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         right.addView(jumpRow)
 
         val dlg = Dialog(this)
+        // Dialog 有独立的 window，Activity 的按键逻辑进不来：
+        // 手柄 A 不是 ENTER，所以要在这里把它转成「点击当前焦点控件」
+        dlg.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN &&
+                (keyCode == KeyEvent.KEYCODE_BUTTON_A ||
+                    keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    keyCode == KeyEvent.KEYCODE_ENTER)
+            ) {
+                val focused = dlg.window?.decorView?.findFocus()
+                if (focused != null && focused !== dlg.window?.decorView) {
+                    focused.performClick(); true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }
         barButton("跳到该位置") {
             val doc = document
             if (doc != null && doc.text.isNotEmpty()) {
@@ -702,10 +784,18 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(0xFF1B2129.toInt())
             }
-            container.addView(root, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            val scroller = ScrollView(this).apply {
+                isFillViewport = true
+                isVerticalScrollBarEnabled = true
+            }
+            scroller.addView(root, android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            container.addView(scroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             container.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (48 * d).toInt()))
             dlg.setContentView(container)
-            dlg.window?.setLayout((dm.widthPixels * 0.86f).toInt(), (dm.heightPixels * 0.7f).toInt())
+            dlg.window?.setLayout((dm.widthPixels * 0.86f).toInt(), (dm.heightPixels * 0.92f).toInt())
+            dlg.setOnShowListener { firstFocusable?.requestFocus() }
             dlg.window?.setBackgroundDrawable(android.graphics.drawable.GradientDrawable().apply {
                 cornerRadius = 12 * d
                 setColor(0xFF1B2129.toInt())
@@ -808,7 +898,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             val d = resources.displayMetrics.density
             setPadding((18 * d).toInt(), 0, (18 * d).toInt(), 0)
             isClickable = true
+            isFocusable = true
+            isFocusableInTouchMode = true
             setOnClickListener { onClick() }
+            setOnFocusChangeListener { v, hasFocus ->
+                v.setBackgroundColor(if (hasFocus) 0x59D9A441 else 0x00000000)
+            }
         }
 
     // ---------------- 按键 ----------------
@@ -850,7 +945,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 if (!Gamepad.isRepeatable(action)) return true
                 if (now - lastKeyAt < Gamepad.REPEAT_INTERVAL_MS) return true
             } else if (!Gamepad.isRepeatable(action)) {
-                if (now - (lastActionAt[action] ?: 0L) < 260L) return true
+                if (now - (lastActionAt[action] ?: 0L) < Gamepad.debounceMs(action)) return true
                 lastActionAt[action] = now
             }
             lastKeyAt = now
@@ -874,10 +969,25 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             Gamepad.Action.FONT_DOWN -> changeFont(-1f)
             Gamepad.Action.FONT_UP -> changeFont(1f)
             Gamepad.Action.BACK -> {
-                if (menuOverlay.visibility == View.VISIBLE) setMenuVisible(false) else finish()
+                if (menuOverlay.visibility == View.VISIBLE) setMenuVisible(false) else requestExit()
             }
         }
         return true
+    }
+
+    /**
+     * 后退的双击验证：第一下只提示，[EXIT_CONFIRM_MS] 内再按一次才退回书架。
+     * 单手阅读时 B 很容易误触，直接退出会丢掉当前阅读节奏。
+     */
+    private fun requestExit() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastBackPressAt <= EXIT_CONFIRM_MS) {
+            lastBackPressAt = 0L
+            finish()
+            return
+        }
+        lastBackPressAt = now
+        toast("再按一次 B 返回书架")
     }
 
     private fun toast(msg: String) {

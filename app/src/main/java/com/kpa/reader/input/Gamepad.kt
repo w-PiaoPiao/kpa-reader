@@ -31,10 +31,9 @@ object Gamepad {
     }
 
     fun actionOf(keyCode: Int): Action? = when (keyCode) {
-        // 翻页：十字键左右 / A / B / L1 / R1 / 翻页键
+        // 翻页：十字键左右 / L1 / R1 / 翻页键
         KeyEvent.KEYCODE_DPAD_LEFT,
         KeyEvent.KEYCODE_DPAD_UP,
-        KeyEvent.KEYCODE_BUTTON_B,
         KeyEvent.KEYCODE_BUTTON_L1,
         KeyEvent.KEYCODE_PAGE_UP -> Action.PREV_PAGE
 
@@ -68,6 +67,8 @@ object Gamepad {
         KeyEvent.KEYCODE_RIGHT_BRACKET,
         KeyEvent.KEYCODE_EQUALS -> Action.FONT_UP
 
+        // 后退：B 不再翻页，改为返回（需双击确认，见 ReaderActivity）
+        KeyEvent.KEYCODE_BUTTON_B,
         KeyEvent.KEYCODE_BACK,
         KeyEvent.KEYCODE_ESCAPE -> Action.BACK
 
@@ -82,19 +83,32 @@ object Gamepad {
         else -> false
     }
 
+    /**
+     * 非连发动作的去抖间隔。
+     *
+     * 大部分动作 260ms —— 有些固件会把一次按下报成两个 ACTION_DOWN，
+     * 不去抖的话夜间模式会被瞬间切回去。
+     * 但「后退」要支持快速双击确认，阈值必须小于人双击的间隔，否则第二下会被吃掉。
+     */
+    fun debounceMs(action: Action): Long = when (action) {
+        Action.BACK -> 120L
+        else -> 260L
+    }
+
     /** 连发间隔（毫秒）——掌机按键回弹快，80ms 左右连翻手感刚好 */
     const val REPEAT_INTERVAL_MS = 80L
 
     /** 按键提示文案，用于阅读器内的帮助浮层 */
     val HELP_LINES: List<Pair<String, String>> = listOf(
         "十字键 ← → / ↑ ↓" to "上一页 / 下一页",
-        "A / B" to "下一页 / 上一页",
-        "L1 / R1" to "上一页 / 下一页",
+        "A / R1" to "下一页",
+        "L1" to "上一页",
         "L2 / R2" to "上一章 / 下一章",
         "X" to "目录",
         "Y" to "全文搜索",
         "START" to "菜单（书签、跳转、字号、主题）",
         "SELECT" to "夜间模式",
+        "B" to "后退（连按两次返回书架）",
         "触摸" to "左/右侧点击翻页，中间呼出菜单"
     )
 }

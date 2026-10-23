@@ -11,6 +11,9 @@
         <item name="android:textSize">12sp</item>
         <item name="android:clickable">true</item>
         <item name="android:focusable">true</item>
-        <item name="android:focusableInTouchMode">false</item>
+        <!-- 必须为 true：只要触摸过一次屏幕就进入 touch mode，
+             此时 focusableInTouchMode=false 的控件永远拿不到焦点，
+             表现就是「能点但十字键选不中」。掌机以手柄为主，不能这样。 -->
+        <item name="android:focusableInTouchMode">true</item>
     </style>
 </resources>
