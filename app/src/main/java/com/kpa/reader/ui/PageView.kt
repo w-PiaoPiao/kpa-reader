@@ -1,5 +1,7 @@
 package com.kpa.reader.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
@@ -168,7 +170,8 @@ class PageView @JvmOverloads constructor(
             lineSpacingMult = settings.lineSpacingMult,
             indentPx = paint.textSize * 2f,
             paraSpacingPx = paint.textSize * settings.paragraphSpacingEm,
-            imageMetrics = { name -> imageSizeOf(name) }
+            imageMetrics = { name -> imageSizeOf(name) },
+            sentenceSegments = settings.sentenceSegments
         )
     }
 
@@ -268,7 +271,9 @@ class PageView @JvmOverloads constructor(
             when (item) {
                 is LayoutEngine.Item.TextSeg -> {
                     val b = d.blocks.getOrNull(item.blockIndex) ?: continue
-                    val layout = e.buildLayout(item.style, b.start, b.end, item.from)
+                    // 必须带上 item.to：按句分段时同一块会被切成多段，
+                    // 只按块边界建 layout 会把整段重画在每一段上
+                    val layout = e.buildLayout(item.style, b.start, b.end, item.from, item.to)
                     texts.add(Rendered(layout, item.y))
                 }
                 is LayoutEngine.Item.Img -> imgs.add(item)
@@ -491,6 +496,13 @@ class PageView @JvmOverloads constructor(
                 ghostAlpha = 1f - p * 0.85f
                 invalidate()
             }
+            // 淡出只到 0.15，不归零的话上一层页面的残影会永久叠在正文上
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    ghostAlpha = 0f
+                    invalidate()
+                }
+            })
             start()
         }
     }

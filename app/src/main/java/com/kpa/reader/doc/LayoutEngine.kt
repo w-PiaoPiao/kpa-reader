@@ -13,6 +13,10 @@ import android.text.style.LeadingMarginSpan
  * 长段落用 getLineStart 在行边界切开，剩余部分接到下一页且不再做首行缩进。
  * 图片按页宽等比缩放，比整页还高的图单独占一页。
  *
+ * [sentenceSegments] 打开时，正文块会先按句切分再逐句排版（「按句分段」/「一句一段」）：
+ * 每句独立成行，句与句之间不加段间距，只有段落首句保留两字缩进。
+ * 切分只改变排版边界，不动字符本身，进度/书签/搜索用的字符偏移因此完全不受影响。
+ *
  * 所有 Paint 都在构造时**深拷贝**一份：分页会被丢到后台线程跑，
  * 如果和界面线程共用同一个 Paint 实例，改字号时会撞车。
  */
@@ -24,7 +28,8 @@ class LayoutEngine(
     private val lineSpacingMult: Float,
     private val indentPx: Float,
     private val paraSpacingPx: Float,
-    private val imageMetrics: (String) -> Pair<Int, Int>?
+    private val imageMetrics: (String) -> Pair<Int, Int>?,
+    private val sentenceSegments: Boolean = false
 ) {
 
     private val body = TextPaint(bodyPaint)
@@ -88,9 +93,22 @@ class LayoutEngine(
         else -> 0f
     }
 
-    fun buildLayout(style: Int, blockStart: Int, blockEnd: Int, fromChar: Int): StaticLayout {
+    /**
+     * [fromChar] / [toChar] 都是**块内**偏移；[toChar] 传 -1 表示一直排到块尾。
+     *
+     * 按句分段时每句只排到自己的句末 —— 否则同一段里的句子会被整段重排一遍、
+     * 在页面上叠着画出来。
+     */
+    fun buildLayout(
+        style: Int,
+        blockStart: Int,
+        blockEnd: Int,
+        fromChar: Int,
+        toChar: Int = -1
+    ): StaticLayout {
         val s = (blockStart + fromChar).coerceIn(0, text.length)
-        val e = blockEnd.coerceIn(s, text.length)
+        val rawEnd = if (toChar >= 0) blockStart + toChar else blockEnd
+        val e = rawEnd.coerceIn(s, text.length)
         val paint = paintFor(style)
         val cs: CharSequence = if (fromChar == 0 && style == Block.BODY && indentPx > 0.5f) {
             SpannableString(text.substring(s, e)).apply {
@@ -134,6 +152,9 @@ class LayoutEngine(
 
         var bi = fromBlock.coerceAtLeast(0)
         var charIn = if (bi == fromBlock) fromChar.coerceAtLeast(0) else 0
+        // 按句分段用：当前块的句末偏移表，以及它属于哪个块（避免每轮重复切句）
+        var segEnds: IntArray = intArrayOf(0)
+        var segBlock = -1
 
         while (bi < blocks.size) {
             val b = blocks[bi]
@@ -153,16 +174,36 @@ class LayoutEngine(
                 continue
             }
 
-            if (b.start + charIn >= b.end) { bi++; charIn = 0; continue }
+            val blockLen = b.end - b.start
+            if (charIn >= blockLen) { bi++; charIn = 0; continue }
 
-            val layout = buildLayout(b.style, b.start, b.end, charIn)
-            val gap = if (items.isEmpty()) 0f else gapBefore(b.style)
+            // 正文块在开启「按句分段」时拆句；标题、引用保持整块不动
+            if (segBlock != bi) {
+                segEnds = if (sentenceSegments && b.style == Block.BODY) {
+                    SentenceSplitter.splitEnds(text, b.start, b.end)
+                } else {
+                    intArrayOf(blockLen)
+                }
+                segBlock = bi
+            }
+            // 当前这一句的句末（块内偏移）
+            var curEnd = blockLen
+            for (k in segEnds.indices) {
+                if (segEnds[k] > charIn) { curEnd = segEnds[k]; break }
+            }
+            curEnd = curEnd.coerceIn(charIn + 1, blockLen)
+
+            val layout = buildLayout(b.style, b.start, b.end, charIn, curEnd)
+            // 同一段内的后续句子紧接着上一句排，不加段间距
+            val gap = if (items.isEmpty() || charIn > 0) 0f else gapBefore(b.style)
             val need = layout.height + gap
+            val isLastSeg = curEnd >= blockLen
+            val after = if (isLastSeg) gapAfter(b.style) else 0f
 
-            if (y + need + gapAfter(b.style) <= height) {
-                items.add(Item.TextSeg(bi, charIn, b.end - b.start, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
-                y += need + gapAfter(b.style)
-                bi++; charIn = 0
+            if (y + need + after <= height) {
+                items.add(Item.TextSeg(bi, charIn, curEnd, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
+                y += need + after
+                if (isLastSeg) { bi++; charIn = 0 } else { charIn = curEnd }
                 continue
             }
 
@@ -175,9 +216,9 @@ class LayoutEngine(
             }
 
             if (fit >= layout.lineCount) {
-                items.add(Item.TextSeg(bi, charIn, b.end - b.start, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
-                y += need + gapAfter(b.style)
-                bi++; charIn = 0
+                items.add(Item.TextSeg(bi, charIn, curEnd, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
+                y += need + after
+                if (isLastSeg) { bi++; charIn = 0 } else { charIn = curEnd }
                 continue
             }
 

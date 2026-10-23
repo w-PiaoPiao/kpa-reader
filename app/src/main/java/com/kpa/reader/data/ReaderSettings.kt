@@ -34,7 +34,9 @@ data class ReaderSettings(
     val padVdp: Int = 10,
     val theme: ReaderTheme = ReaderTheme.PAPER,
     val serif: Boolean = true,
-    val showStatusBar: Boolean = true
+    val showStatusBar: Boolean = true,
+    /** 按句分段：长自然段拆成一句一段显示，只影响排版，不改字符偏移 */
+    val sentenceSegments: Boolean = false
 )
 
 class SettingsStore(context: Context) {
@@ -49,7 +51,8 @@ class SettingsStore(context: Context) {
         padVdp = sp.getInt("pad_v", 10).coerceIn(4, 80),
         theme = ReaderTheme.of(sp.getString("theme", "paper")),
         serif = sp.getBoolean("serif", true),
-        showStatusBar = sp.getBoolean("status_bar", true)
+        showStatusBar = sp.getBoolean("status_bar", true),
+        sentenceSegments = sp.getBoolean("sentence_segments", false)
     )
 
     fun save(s: ReaderSettings) {
@@ -62,6 +65,7 @@ class SettingsStore(context: Context) {
             .putString("theme", s.theme.key)
             .putBoolean("serif", s.serif)
             .putBoolean("status_bar", s.showStatusBar)
+            .putBoolean("sentence_segments", s.sentenceSegments)
             .apply()
     }
 

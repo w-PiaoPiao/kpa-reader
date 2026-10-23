@@ -652,6 +652,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         title(right, "显示")
         toggle(right, "衬线字体", settings.serif) { on -> applySettings(settings.copy(serif = on)) }
         toggle(right, "页眉页脚", settings.showStatusBar) { on -> applySettings(settings.copy(showStatusBar = on)) }
+        toggle(right, "按句分段", settings.sentenceSegments) { on ->
+            applySettings(settings.copy(sentenceSegments = on))
+        }
 
         title(right, "跳转")
         val jumpRow = LinearLayout(this).apply {
