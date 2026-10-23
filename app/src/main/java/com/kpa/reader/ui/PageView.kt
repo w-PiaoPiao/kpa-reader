@@ -271,9 +271,9 @@ class PageView @JvmOverloads constructor(
             when (item) {
                 is LayoutEngine.Item.TextSeg -> {
                     val b = d.blocks.getOrNull(item.blockIndex) ?: continue
-                    // 必须带上 item.to：按句分段时同一块会被切成多段，
-                    // 只按块边界建 layout 会把整段重画在每一段上
-                    val layout = e.buildLayout(item.style, b.start, b.end, item.from, item.to)
+                    // 必须带上 item.to 和 item.indent：按句分段时同一块会被切成多段，
+                    // 只按块边界建 layout 会把整段重画在每一段上；缩进也必须和排版时一致
+                    val layout = e.buildLayout(item.style, b.start, b.end, item.from, item.to, item.indent)
                     texts.add(Rendered(layout, item.y))
                 }
                 is LayoutEngine.Item.Img -> imgs.add(item)

@@ -98,19 +98,23 @@ class LayoutEngine(
      *
      * 按句分段时每句只排到自己的句末 —— 否则同一段里的句子会被整段重排一遍、
      * 在页面上叠着画出来。
+     *
+     * [indent] 决定首行是否缩进两字。**排版和绘制必须传同一个值**，
+     * 否则算出来的行高和实际画出来的对不上，页面会错位。
      */
     fun buildLayout(
         style: Int,
         blockStart: Int,
         blockEnd: Int,
         fromChar: Int,
-        toChar: Int = -1
+        toChar: Int = -1,
+        indent: Boolean = fromChar == 0
     ): StaticLayout {
         val s = (blockStart + fromChar).coerceIn(0, text.length)
         val rawEnd = if (toChar >= 0) blockStart + toChar else blockEnd
         val e = rawEnd.coerceIn(s, text.length)
         val paint = paintFor(style)
-        val cs: CharSequence = if (fromChar == 0 && style == Block.BODY && indentPx > 0.5f) {
+        val cs: CharSequence = if (indent && style == Block.BODY && indentPx > 0.5f) {
             SpannableString(text.substring(s, e)).apply {
                 if (length > 0) {
                     setSpan(
@@ -193,7 +197,10 @@ class LayoutEngine(
             }
             curEnd = curEnd.coerceIn(charIn + 1, blockLen)
 
-            val layout = buildLayout(b.style, b.start, b.end, charIn, curEnd)
+            // 句首（块首，或某个句末边界）才缩进；跨页续排的句中不缩进
+            val indentHere = (charIn == 0 || segEnds.any { it == charIn }) && b.style == Block.BODY
+
+            val layout = buildLayout(b.style, b.start, b.end, charIn, curEnd, indentHere)
             // 同一段内的后续句子紧接着上一句排，不加段间距
             val gap = if (items.isEmpty() || charIn > 0) 0f else gapBefore(b.style)
             val need = layout.height + gap
@@ -201,7 +208,7 @@ class LayoutEngine(
             val after = if (isLastSeg) gapAfter(b.style) else 0f
 
             if (y + need + after <= height) {
-                items.add(Item.TextSeg(bi, charIn, curEnd, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
+                items.add(Item.TextSeg(bi, charIn, curEnd, indentHere, b.style, (y + gap).toInt()))
                 y += need + after
                 if (isLastSeg) { bi++; charIn = 0 } else { charIn = curEnd }
                 continue
@@ -216,7 +223,7 @@ class LayoutEngine(
             }
 
             if (fit >= layout.lineCount) {
-                items.add(Item.TextSeg(bi, charIn, curEnd, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
+                items.add(Item.TextSeg(bi, charIn, curEnd, indentHere, b.style, (y + gap).toInt()))
                 y += need + after
                 if (isLastSeg) { bi++; charIn = 0 } else { charIn = curEnd }
                 continue
@@ -227,7 +234,7 @@ class LayoutEngine(
                 flush(bi, charIn)
                 continue
             }
-            items.add(Item.TextSeg(bi, charIn, charIn + cut, charIn == 0 && b.style == Block.BODY, b.style, (y + gap).toInt()))
+            items.add(Item.TextSeg(bi, charIn, charIn + cut, indentHere, b.style, (y + gap).toInt()))
             flush(bi, charIn + cut)
             charIn += cut
         }
