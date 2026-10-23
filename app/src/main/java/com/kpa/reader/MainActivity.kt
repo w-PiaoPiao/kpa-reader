@@ -38,8 +38,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recycler: RecyclerView
     private lateinit var emptyView: View
 
-    private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) startImport(uri)
+    private val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val uri = res.data?.data
+        if (res.resultCode == android.app.Activity.RESULT_OK && uri != null) startImport(uri)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,7 +66,14 @@ class MainActivity : AppCompatActivity() {
         recycler.adapter = adapter
 
         findViewById<View>(R.id.btnImport).setOnClickListener {
-            runCatching { picker.launch(arrayOf("text/plain", "application/epub+zip", "*/*")) }
+            // 不用 OpenDocument 契约：它一定会带上 EXTRA_MIME_TYPES 白名单，
+            // 而 Android 不认识 .mobi / .azw3（系统报成「PRC 文件」和「BIN 文件」），
+            // 白名单一过滤它们就不见了。这里只给 type=*/*，让选择器不做 MIME 过滤。
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }
+            runCatching { picker.launch(intent) }
         }
         findViewById<View>(R.id.btnHelp).setOnClickListener { showHelp() }
 
