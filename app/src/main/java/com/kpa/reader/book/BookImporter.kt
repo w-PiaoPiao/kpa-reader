@@ -29,7 +29,9 @@ object BookImporter {
         val chapters: List<Chapter>,
         val images: Map<String, ByteArray>,
         val format: String,
-        val encoding: String
+        val encoding: String,
+        /** 解析器声明的封面（images 里的原始 key）；空表示没声明 */
+        val cover: String = ""
     )
 
     suspend fun import(context: Context, uri: Uri): Book {
@@ -50,7 +52,8 @@ object BookImporter {
                     chapters = p.chapters,
                     images = p.images,
                     format = "epub",
-                    encoding = "UTF-8"
+                    encoding = "UTF-8",
+                    cover = p.cover
                 )
             }
             ext in setOf("mobi", "azw", "azw3", "prc", "azw4", "pdb") ||
@@ -95,7 +98,7 @@ object BookImporter {
         val id = UUID.randomUUID().toString()
         val dir = File(context.filesDir, "books").apply { mkdirs() }
 
-        val (blocks, images) = remapImages(content.blocks, content.images)
+        val (blocks, images, nameMap) = remapImages(content.blocks, content.images)
 
         File(dir, "$id.txt").writeText(content.text, Charsets.UTF_8)
         File(dir, "$id.blocks").writeText(Document(content.text, blocks).serialize(), Charsets.UTF_8)
@@ -105,9 +108,10 @@ object BookImporter {
             images.forEach { (n, data) -> runCatching { File(imgDir, n).writeBytes(data) } }
         }
 
-        // 封面：EPUB 的封面章节排在最前，直接取正文第一张图；
-        // MOBI/AZW3 的图片按 recindex 引用、不进 blocks，退而取提取出的第一张（img_0）
-        val coverName = blocks.firstOrNull { it.isImage }?.image
+        // 封面优先级：解析器声明的（EPUB 的 OPF cover）> 正文第一张图 > 提取出的第一张
+        // MOBI/AZW3 的图片按 recindex 引用、不进 blocks，所以最后一步是给它们兜底的
+        val coverName = nameMap[content.cover]
+            ?: blocks.firstOrNull { it.isImage }?.image
             ?: images.keys.sorted().firstOrNull()
             ?: ""
 
@@ -134,9 +138,9 @@ object BookImporter {
     private fun remapImages(
         blocks: List<Block>,
         raw: Map<String, ByteArray>
-    ): Pair<List<Block>, Map<String, ByteArray>> {
+    ): Triple<List<Block>, Map<String, ByteArray>, Map<String, String>> {
         if (raw.isEmpty()) {
-            return blocks.filter { !it.isImage } to emptyMap()
+            return Triple(blocks.filter { !it.isImage }, emptyMap(), emptyMap())
         }
         val nameMap = HashMap<String, String>(raw.size)
         val out = LinkedHashMap<String, ByteArray>(raw.size)
@@ -152,7 +156,7 @@ object BookImporter {
         val nb = blocks.mapNotNull { b ->
             if (!b.isImage) b else nameMap[b.image]?.let { b.copy(image = it) }
         }
-        return nb to out
+        return Triple(nb, out, nameMap)
     }
 
     fun imageDir(context: Context, bookId: String): File =

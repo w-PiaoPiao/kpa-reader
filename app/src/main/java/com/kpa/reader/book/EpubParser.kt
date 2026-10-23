@@ -26,7 +26,9 @@ object EpubParser {
         val text: String,
         val blocks: List<Block>,
         val chapters: List<Chapter>,
-        val images: Map<String, ByteArray>
+        val images: Map<String, ByteArray>,
+        /** OPF 里声明的封面图（zip 路径）；空表示这本书没声明封面 */
+        val cover: String = ""
     )
 
     private const val MAX_IMAGE_BYTES = 64L * 1024 * 1024
@@ -100,6 +102,10 @@ object EpubParser {
 
         val toc = readToc(entries, opfPath, baseDir)
 
+        // 封面按 OPF 声明取，不能拿「正文第一张图」凑数 ——
+        // 很多书第一张图是扉页、印章或出版社 logo（《剑来》就是这样取错的）
+        val coverPath = readCoverHref(opf, baseDir)
+
         val sb = StringBuilder()
         val blocks = ArrayList<Block>()
         val chapters = ArrayList<Chapter>()
@@ -153,7 +159,44 @@ object EpubParser {
         val images = HashMap<String, ByteArray>()
         usedImages.forEach { k -> entries[k]?.let { images[k] = it } }
 
-        return Parsed(bookTitle, author, sb.toString(), blocks, chapters, images)
+        // 封面即使正文没引用（没有封面页的 EPUB 很常见）也要存进去，否则书架没图可用
+        var realCover = ""
+        if (coverPath.isNotBlank()) {
+            val real = entries.keys.firstOrNull { it == coverPath }
+                ?: entries.keys.firstOrNull { it.equals(coverPath, ignoreCase = true) }
+            if (real != null) {
+                images[real] = entries.getValue(real)
+                realCover = real
+            }
+        }
+
+        return Parsed(bookTitle, author, sb.toString(), blocks, chapters, images, realCover)
+    }
+
+    /**
+     * 找 OPF 声明的封面图：
+     * 1. EPUB3 `<item properties="cover-image">`
+     * 2. EPUB2 `<meta name="cover" content="item-id">`
+     * 3. 兜底：id 或文件名里带 cover 的图片
+     */
+    private fun readCoverHref(opf: String, baseDir: String): String {
+        val items = OPF_ITEM.findAll(opf).map { parseAttrs(it.value) }.toList()
+
+        val epub3 = items.firstOrNull { (it["properties"] ?: "").contains("cover-image", true) }
+            ?.get("href")
+
+        val metaId = Regex("<meta\\s+[^>]*name\\s*=\\s*\"cover\"[^>]*>", RegexOption.IGNORE_CASE)
+            .find(opf)?.let { parseAttrs(it.value)["content"] }
+        val epub2 = metaId?.let { id -> items.firstOrNull { it["id"] == id }?.get("href") }
+
+        val byName = items.firstOrNull { a ->
+            val href = a["href"] ?: ""
+            IMG_EXT.any { href.endsWith(it, true) } &&
+                ((a["id"] ?: "").contains("cover", true) || href.contains("cover", true))
+        }?.get("href")
+
+        val href = epub3 ?: epub2 ?: byName ?: return ""
+        return resolvePath(baseDir, href)
     }
 
     private fun readToc(entries: Map<String, ByteArray>, opfPath: String, baseDir: String): Map<String, String> {
