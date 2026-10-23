@@ -40,7 +40,9 @@ data class Book(
     val bookmarks: List<Bookmark> = emptyList(),
     val finished: Boolean = false,
     val author: String = "",
-    val hasImages: Boolean = false
+    val hasImages: Boolean = false,
+    /** 封面图在 books/<id>.img/ 里的文件名；空表示没封面（TXT 或书里没图） */
+    val cover: String = ""
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -71,6 +73,7 @@ data class Book(
         })
         put("author", author)
         put("hasImages", hasImages)
+        put("cover", cover)
     }
 
     companion object {
@@ -109,7 +112,8 @@ data class Book(
                 bookmarks = marks,
                 finished = o.optBoolean("finished"),
                 author = o.optString("author", ""),
-                hasImages = o.optBoolean("hasImages", false)
+                hasImages = o.optBoolean("hasImages", false),
+                cover = o.optString("cover", "")
             )
         }
     }

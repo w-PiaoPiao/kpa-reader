@@ -105,6 +105,12 @@ object BookImporter {
             images.forEach { (n, data) -> runCatching { File(imgDir, n).writeBytes(data) } }
         }
 
+        // 封面：EPUB 的封面章节排在最前，直接取正文第一张图；
+        // MOBI/AZW3 的图片按 recindex 引用、不进 blocks，退而取提取出的第一张（img_0）
+        val coverName = blocks.firstOrNull { it.isImage }?.image
+            ?: images.keys.sorted().firstOrNull()
+            ?: ""
+
         val now = System.currentTimeMillis()
         return Book(
             id = id,
@@ -119,7 +125,8 @@ object BookImporter {
             addedAt = now,
             lastReadAt = now,
             author = content.author,
-            hasImages = images.isNotEmpty()
+            hasImages = images.isNotEmpty(),
+            cover = coverName
         )
     }
 

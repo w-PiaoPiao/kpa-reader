@@ -1,6 +1,7 @@
 package com.kpa.reader.data
 
 import android.content.Context
+import com.kpa.reader.doc.Document
 import org.json.JSONArray
 import java.io.File
 import java.util.concurrent.Executors
@@ -16,9 +17,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 退出前调用 [flush] 确保落盘。
  */
-class BookStore private constructor(context: Context) {
+class BookStore private constructor(private val appContext: Context) {
 
-    private val file = File(context.filesDir, "library.json")
+    private val file = File(appContext.filesDir, "library.json")
     private val lock = Any()
     private val books = ArrayList<Book>()
 
@@ -29,6 +30,7 @@ class BookStore private constructor(context: Context) {
 
     init {
         load()
+        migrateCovers()
     }
 
     private fun load() {
@@ -44,6 +46,36 @@ class BookStore private constructor(context: Context) {
                 }
             }
         }
+    }
+
+    /**
+     * 老数据没有 cover 字段（书架改版前导入的书）：从 blocks 里补第一张图当封面。
+     * 只处理「有图但没记封面」的书，无图的 TXT 直接跳过，所以开销很小。
+     */
+    private fun migrateCovers() {
+        val dir = File(appContext.filesDir, "books")
+        var changed = false
+        synchronized(lock) {
+            for (i in books.indices) {
+                val b = books[i]
+                if (b.cover.isNotBlank() || !b.hasImages) continue
+                val blockFile = File(dir, "${b.id}.blocks")
+                if (!blockFile.exists()) continue
+                val cover = runCatching {
+                    Document.parseBlocks(blockFile.readText(Charsets.UTF_8))
+                        .firstOrNull { it.isImage }?.image
+                }.getOrNull() ?: runCatching {
+                    // MOBI/AZW3 的图片不进 blocks，退回去看 img 目录里编号最小的那张
+                    File(dir, "${b.id}.img").listFiles()
+                        ?.sortedBy { it.name }?.firstOrNull()?.name
+                }.getOrNull()
+                if (!cover.isNullOrBlank()) {
+                    books[i] = b.copy(cover = cover)
+                    changed = true
+                }
+            }
+        }
+        if (changed) persist()
     }
 
     fun all(): List<Book> = synchronized(lock) { books.sortedByDescending { it.lastReadAt } }
