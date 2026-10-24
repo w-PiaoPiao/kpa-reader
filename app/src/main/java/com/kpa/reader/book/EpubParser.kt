@@ -2,12 +2,16 @@ package com.kpa.reader.book
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.kpa.reader.data.Chapter
 import com.kpa.reader.doc.Block
 import com.kpa.reader.doc.HtmlBlockParser
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.IOException
 import java.net.URLDecoder
+import java.util.zip.ZipException
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 
 /**
@@ -32,6 +36,7 @@ object EpubParser {
     )
 
     private const val MAX_IMAGE_BYTES = 64L * 1024 * 1024
+    private const val TAG = "EpubParser"
 
     private val OPF_ITEM = Regex("<item\\s+[^>]*>", RegexOption.IGNORE_CASE)
     private val SPINE_REF = Regex("<itemref\\s+[^>]*>", RegexOption.IGNORE_CASE)
@@ -40,38 +45,104 @@ object EpubParser {
     private val KEEP_EXT = listOf(".xhtml", ".html", ".htm", ".opf", ".ncx", ".xml")
     private val IMG_EXT = listOf(".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
 
-    fun parse(context: Context, uri: Uri): Parsed {
-        val entries = HashMap<String, ByteArray>()
-        var imageBytes = 0L
+    /** 收集 zip 内的文本/图片 entry。先流式读（快），读不完整再走 ZipFile 兜底 */
+    private fun readEntries(context: Context, uri: Uri): HashMap<String, ByteArray> {
+        val streamed = readViaStream(context, uri)
+        if (streamed != null && hasOpf(streamed)) return streamed
+        Log.w(TAG, "流式读取不可用（异常或残缺，entries=${streamed?.size}），走 ZipFile 兜底")
+        return readViaZipFile(context, uri)
+    }
 
-        context.contentResolver.openInputStream(uri)?.use { input ->
+    /** 后续解析全靠 OPF：流式结果里没有它就当读取失败 */
+    private fun hasOpf(entries: Map<String, ByteArray>): Boolean =
+        entries.keys.any { it.endsWith(".opf", true) } ||
+            entries.containsKey("META-INF/container.xml")
+
+    /**
+     * 流式读取。不少网文工具生成的 EPUB 会给 STORE 条目也标 data descriptor ——
+     * 桌面 JVM 会抛 ZipException，但 Android 的实现不抛，而是静默读出残缺数据。
+     * 所以这里「不抛异常 ≠ 成功」，调用方必须用 [hasOpf] 校验结果。
+     */
+    private fun readViaStream(context: Context, uri: Uri): HashMap<String, ByteArray>? {
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("无法打开 EPUB")
+        try {
+            val entries = HashMap<String, ByteArray>()
+            var imageBytes = 0L
             ZipInputStream(BufferedInputStream(input)).use { zis ->
                 while (true) {
                     val entry = zis.nextEntry ?: break
                     if (entry.isDirectory) continue
                     val name = entry.name
                     val lower = name.lowercase()
+                    // 每条数据都必须消费掉（哪怕丢弃），否则 data descriptor 错位、后面全崩
+                    val bytes = zis.readBytes()
                     when {
-                        KEEP_EXT.any { lower.endsWith(it) } -> entries[name] = zis.readBytes()
-                        IMG_EXT.any { lower.endsWith(it) } -> {
+                        KEEP_EXT.any { lower.endsWith(it) } -> entries[name] = bytes
+                        IMG_EXT.any { lower.endsWith(it) } ->
                             if (imageBytes < MAX_IMAGE_BYTES) {
-                                val b = zis.readBytes()
-                                entries[name] = b
-                                imageBytes += b.size
+                                entries[name] = bytes
+                                imageBytes += bytes.size
                             }
-                        }
                     }
                 }
             }
-        } ?: throw IOException("无法打开 EPUB")
+            return entries
+        } catch (e: ZipException) {
+            Log.w(TAG, "流式读取抛异常: $e")
+            return null
+        } finally {
+            runCatching { input.close() }
+        }
+    }
+
+    /** 兜底：拷到临时文件用 ZipFile 按中央目录读，对非标准 zip 宽容得多 */
+    private fun readViaZipFile(context: Context, uri: Uri): HashMap<String, ByteArray> {
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("无法打开 EPUB")
+        val tmp = File.createTempFile("epub_", ".zip", context.cacheDir)
+        try {
+            tmp.outputStream().use { input.copyTo(it) }
+            val entries = HashMap<String, ByteArray>()
+            var imageBytes = 0L
+            ZipFile(tmp).use { zf ->
+                val en = zf.entries()
+                while (en.hasMoreElements()) {
+                    val entry = en.nextElement()
+                    if (entry.isDirectory) continue
+                    val name = entry.name
+                    val lower = name.lowercase()
+                    val bytes = zf.getInputStream(entry).readBytes()
+                    when {
+                        KEEP_EXT.any { lower.endsWith(it) } -> entries[name] = bytes
+                        IMG_EXT.any { lower.endsWith(it) } ->
+                            if (imageBytes < MAX_IMAGE_BYTES) {
+                                entries[name] = bytes
+                                imageBytes += bytes.size
+                            }
+                    }
+                }
+            }
+            Log.w(TAG, "ZipFile 兜底: entries=${entries.size} container=${entries.containsKey("META-INF/container.xml")} " +
+                "opfKeys=${entries.keys.filter { it.endsWith(".opf", true) }} " +
+                "firstKeys=${entries.keys.take(5)}")
+            return entries
+        } catch (e: ZipException) {
+            throw IOException("这个 EPUB 的 zip 数据损坏，换个来源重新下载试试")
+        } finally {
+            runCatching { input.close() }
+            tmp.delete()
+        }
+    }
+
+    fun parse(context: Context, uri: Uri): Parsed {
+        val entries = readEntries(context, uri)
 
         val containerXml = entries["META-INF/container.xml"]?.toString(Charsets.UTF_8)
         val opfPath = containerXml
             ?.let { Regex("full-path\\s*=\\s*\"([^\"]+)\"").find(it)?.groupValues?.get(1) }
             ?: entries.keys.firstOrNull { it.endsWith(".opf", true) }
-            ?: throw IOException("EPUB 缺少 OPF")
+            ?: throw IOException("这个 EPUB 里找不到章节清单（OPF），文件可能不完整，换个来源重新下载试试")
 
-        val opf = entries[opfPath]?.toString(Charsets.UTF_8) ?: throw IOException("EPUB 缺少 OPF 内容")
+        val opf = entries[opfPath]?.toString(Charsets.UTF_8) ?: throw IOException("这个 EPUB 里找不到章节清单（OPF），文件可能不完整，换个来源重新下载试试")
         val baseDir = opfPath.substringBeforeLast('/', "")
 
         val manifest = HashMap<String, String>()
@@ -113,7 +184,8 @@ object EpubParser {
 
         for (href in order) {
             val path = resolvePath(baseDir, href)
-            val bytes = entries[path] ?: entries[href] ?: continue
+            // 处理完一章就从内存里扔掉一章：几千章的书全量驻留会把掌机堆打爆
+            val bytes = entries.remove(path) ?: entries.remove(href) ?: continue
             val html = decodeHtml(bytes)
             val specs = HtmlBlockParser.parse(html)
             if (specs.isEmpty()) continue
@@ -199,7 +271,7 @@ object EpubParser {
         return resolvePath(baseDir, href)
     }
 
-    private fun readToc(entries: Map<String, ByteArray>, opfPath: String, baseDir: String): Map<String, String> {
+    private fun readToc(entries: MutableMap<String, ByteArray>, opfPath: String, baseDir: String): Map<String, String> {
         val out = HashMap<String, String>()
         val opf = entries[opfPath]?.toString(Charsets.UTF_8) ?: return out
 
@@ -210,14 +282,18 @@ object EpubParser {
         if (navHref != null) {
             val p = resolvePath(baseDir, navHref)
             val nav = entries[p]?.toString(Charsets.UTF_8)
+            entries.remove(p)
             if (nav != null) {
+                // 目录基准路径必须从「路径 p」算 —— nav 变量是整个文件内容，
+                // 拿它当 baseDir 会把 235KB 的 HTML 拼进每个目录项路径，大书直接 OOM
+                val dir = if (p.contains('/')) p.substringBeforeLast('/') else ""
                 Regex("<a\\s[^>]*href\\s*=\\s*\"([^\"]+)\"[^>]*>(.*?)</a>",
                     setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
                     .findAll(nav).forEach { m ->
                         val href = m.groupValues[1].substringBefore('#')
                         val text = HtmlBlockParser.decodeEntities(m.groupValues[2].replace(Regex("<[^>]+>"), "")).trim()
                         if (href.isNotEmpty() && text.isNotEmpty()) {
-                            val resolved = resolvePath(nav.substringBeforeLast('/', ""), href)
+                            val resolved = resolvePath(dir, href)
                             out.putIfAbsent(resolved, text)
                             out.putIfAbsent(href, text)
                         }
@@ -232,6 +308,7 @@ object EpubParser {
         if (ncxPath != null) {
             val p = resolvePath(baseDir, ncxPath)
             val ncx = entries[p]?.toString(Charsets.UTF_8)
+            entries.remove(p)
             if (ncx != null) {
                 // 注意：ncx 就在根目录时 substringBeforeLast('/') 会返回整个文件名，
                 // 那样拼出来的 href 全是错的，必须显式判空
