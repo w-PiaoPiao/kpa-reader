@@ -52,7 +52,7 @@ git commit -m "feat: 说明做了什么"
 | 段 | 何时 +1 | 谁决定 |
 |---|---|---|
 | **x**（第一位） | 只有用户明确要求时 | 用户 |
-| **y**（第二位） | 在 GitHub 上发布 release，或用户明确要求时 | 用户 / 发版 |
+| **y**（第二位） | 只有用户明确要求时（发 release **不**自动进位） | 用户 |
 | **z**（第三位） | 影响 App 行为的代码改动 | AI 判断，自动升 |
 
 ### 具体怎么走
@@ -60,17 +60,16 @@ git commit -m "feat: 说明做了什么"
 - **日常开发只升 z**。修 bug、加功能、改按键映射、调整 UI —— 统统 `z + 1`，不动 y。
 - **纯文档改动不升版本**。README、注释、截图、`.workbuddy/memory/` 的更新不碰版本号，
   否则版本号会通胀得毫无意义。判据：**有没有改动 `app/src/` 下的代码**。
-- **发 release 时 y + 1、z 归零**。命令示意：
+- **发 release 不动版本号**。tag 和说明直接用 `build.gradle.kts` 里的当前版本号
+  （比如当前是 1.7.0 就发 `v1.7.0`，哪怕这次 release 只包含几个 z 级改动）：
 
   ```bash
-  # 先把 build.gradle.kts 改成 1.7.0 / versionCode 10700
-  git commit -am "chore: 版本 1.7.0"
   git push
-  gh release create v1.7.0 --title "1.7.0" --notes "..."
+  gh release create v1.7.0 app-release.apk --title "1.7.0" --notes "..."
   ```
 
-- **x 永远等用户开口**。哪怕改动再大（缓存格式变更、按键体系重构），也只升 z，
-  等用户说"升一位"再动。
+- **y 和 x 永远等用户开口**。用户要求升 y 时 z 归零（1.6.9 → 1.7.0）。
+  哪怕改动再大（缓存格式变更、按键体系重构），也只升 z，等用户说"升一位"再动。
 
 ### versionCode 跟着版本号走
 
