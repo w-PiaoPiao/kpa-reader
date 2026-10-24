@@ -36,7 +36,9 @@ data class ReaderSettings(
     val serif: Boolean = true,
     val showStatusBar: Boolean = true,
     /** 按句分段：长自然段拆成一句一段显示，只影响排版，不改字符偏移 */
-    val sentenceSegments: Boolean = false
+    val sentenceSegments: Boolean = false,
+    /** 音量键翻页：默认关（避免误触调不成音量）；开了之后音量+ 上一页、音量- 下一页 */
+    val volumeKeyTurn: Boolean = false
 )
 
 class SettingsStore(context: Context) {
@@ -52,7 +54,8 @@ class SettingsStore(context: Context) {
         theme = ReaderTheme.of(sp.getString("theme", "paper")),
         serif = sp.getBoolean("serif", true),
         showStatusBar = sp.getBoolean("status_bar", true),
-        sentenceSegments = sp.getBoolean("sentence_segments", false)
+        sentenceSegments = sp.getBoolean("sentence_segments", false),
+        volumeKeyTurn = sp.getBoolean("volume_key_turn", false)
     )
 
     fun save(s: ReaderSettings) {
@@ -66,6 +69,7 @@ class SettingsStore(context: Context) {
             .putBoolean("serif", s.serif)
             .putBoolean("status_bar", s.showStatusBar)
             .putBoolean("sentence_segments", s.sentenceSegments)
+            .putBoolean("volume_key_turn", s.volumeKeyTurn)
             .apply()
     }
 

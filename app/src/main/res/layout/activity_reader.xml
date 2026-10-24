@@ -110,7 +110,12 @@
             <TextView
                 android:id="@+id/btnBookmark"
                 style="@style/ToolButton"
-                android:text="书签" />
+                android:text="＋书签" />
+
+            <TextView
+                android:id="@+id/btnBookmarks"
+                style="@style/ToolButton"
+                android:text="书签列表" />
 
             <TextView
                 android:id="@+id/btnFontDown"
@@ -178,5 +183,20 @@
             android:textColorHint="#6B7683"
             android:textSize="14sp" />
     </LinearLayout>
+
+    <!-- 首次进阅读的按键提示：只出现一次，任意按键或 4 秒后消失 -->
+    <TextView
+        android:id="@+id/tvFirstHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="36dp"
+        android:background="@drawable/bg_hint"
+        android:gravity="center"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:textColor="#E8E4DA"
+        android:textSize="11.5sp"
+        android:visibility="gone" />
 
 </FrameLayout>

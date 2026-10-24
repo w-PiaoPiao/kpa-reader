@@ -96,6 +96,16 @@ object Gamepad {
     const val REPEAT_INTERVAL_MS = 80L
 
     /**
+     * 按动作区分的连发间隔。
+     * 换章单独放慢到 400ms：长按 R1 是想快进几章，80ms/章一秒冲过十几章根本停不准，
+     * 400ms 大约一秒两三章，松手能落在目标章附近。
+     */
+    fun repeatIntervalMs(action: Action): Long = when (action) {
+        Action.PREV_CHAPTER, Action.NEXT_CHAPTER -> 400L
+        else -> REPEAT_INTERVAL_MS
+    }
+
+    /**
      * 按键提示文案。按当前映射动态生成，用户在设置里改过键之后帮助也对得上。
      */
     fun helpLines(): List<Pair<String, String>> {

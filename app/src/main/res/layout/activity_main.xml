@@ -41,9 +41,21 @@
             android:textSize="10.5sp" />
 
         <TextView
+            android:id="@+id/btnSort"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_tool_btn"
+            android:gravity="center"
+            android:paddingHorizontal="8dp"
+            android:text="排序·最近阅读"
+            android:textColor="#DCE3EC"
+            android:textSize="11sp" />
+
+        <TextView
             android:id="@+id/btnHelp"
             android:layout_width="wrap_content"
             android:layout_height="32dp"
+            android:layout_marginStart="8dp"
             android:background="@drawable/bg_tool_btn"
             android:gravity="center"
             android:paddingHorizontal="10dp"

@@ -26,14 +26,18 @@ class ShelfAdapter(
 
     private var items: List<Book> = emptyList()
 
+    /** 「继续」角标所在位置；-1 表示没有正在读的书 */
+    private var continuePos = -1
+
     /** 封面占位底色：按书 id 稳定取一个，不同书不会都是同一个灰块 */
     private val placeholderColors = intArrayOf(
         0xFF36485C.toInt(), 0xFF4A3B52.toInt(), 0xFF33544A.toInt(),
         0xFF544A33.toInt(), 0xFF35474E.toInt(), 0xFF4E3A3A.toInt()
     )
 
-    fun submit(list: List<Book>) {
+    fun submit(list: List<Book>, continuePosition: Int = -1) {
         items = list
+        continuePos = continuePosition
         notifyDataSetChanged()
     }
 
@@ -59,8 +63,9 @@ class ShelfAdapter(
 
         val pct = (b.progressPercent * 1000).toInt().coerceIn(0, 1000)
         holder.progress.progress = pct
+        // 「继续」跟着最近在读的那本走，排序换了也不挂错卡
         holder.badgeContinue.visibility =
-            if (position == 0 && !b.finished && b.progressPercent < 1f) View.VISIBLE else View.GONE
+            if (position == continuePos && !b.finished && b.progressPercent < 1f) View.VISIBLE else View.GONE
         holder.badgeDone.visibility =
             if (b.finished || b.progressPercent >= 1f) View.VISIBLE else View.GONE
 

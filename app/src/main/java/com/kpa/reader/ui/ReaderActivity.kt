@@ -4,7 +4,9 @@ import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.drawable.ColorDrawable
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -82,6 +84,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private lateinit var tvChapterTitle: TextView
     private lateinit var tvPercent: TextView
     private lateinit var btnTheme: TextView
+    private lateinit var tvFirstHint: TextView
 
     private lateinit var store: BookStore
     private lateinit var settingsStore: SettingsStore
@@ -100,12 +103,23 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private var lastClearBookmarksAt = 0L
     private var savedOffset = -1
 
+    /** 页脚电量；-1 未知。阅读页屏幕常亮又没有系统状态栏，电量只有这里能看 */
+    private var batteryPct = -1
+    private var lowBatteryToasted = false
+
+    private val batteryTick = Runnable { refreshBattery(reschedule = true) }
+
     private lateinit var searchOverlay: View
     private lateinit var searchList: ListView
     private lateinit var searchInput: EditText
     private lateinit var searchStatus: TextView
     private var searchResults: List<Hit> = emptyList()
     private var searchAdapter: ArrayAdapter<CharSequence>? = null
+
+    /** 边打边搜的 250ms 防抖，统一持有才能在收起搜索层时取消 */
+    private val searchDebounceRunnable = Runnable {
+        if (::searchInput.isInitialized) runSearch(searchInput.text.toString().trim())
+    }
 
     private val saveRunnable = Runnable { saveProgressNow() }
 
@@ -136,11 +150,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         tvChapterTitle = findViewById(R.id.tvChapterTitle)
         tvPercent = findViewById(R.id.tvPercent)
         btnTheme = findViewById(R.id.btnTheme)
+        tvFirstHint = findViewById(R.id.tvFirstHint)
 
         pageView.listener = this
         pageView.scope = lifecycleScope
         bindMenu()
         setupSearchUi()
+        refreshBattery(reschedule = true)
 
         val id = intent.getStringExtra(EXTRA_ID)
         if (id.isNullOrEmpty()) { finish(); return }
@@ -151,10 +167,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
     private fun bindMenu() {
         findViewById<View>(R.id.menuScrim).setOnClickListener { setMenuVisible(false) }
-        findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
+        // 和 B 键同走双击确认：菜单按钮是显式操作，但误触一下就丢阅读位置同样难受
+        findViewById<View>(R.id.btnBack).setOnClickListener { requestExit("再按一次「返回」退出阅读") }
         findViewById<View>(R.id.btnToc).setOnClickListener { showToc() }
         findViewById<View>(R.id.btnSearch).setOnClickListener { showSearch() }
         findViewById<View>(R.id.btnBookmark).setOnClickListener { addBookmark() }
+        findViewById<View>(R.id.btnBookmarks).setOnClickListener { showBookmarks() }
         findViewById<View>(R.id.btnFontDown).setOnClickListener { changeFont(-1f) }
         findViewById<View>(R.id.btnFontUp).setOnClickListener { changeFont(1f) }
         findViewById<View>(R.id.btnTheme).setOnClickListener { cycleTheme() }
@@ -224,6 +242,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
             val q = intent.getStringExtra(EXTRA_SEARCH)
             if (!q.isNullOrBlank()) showSearch(q)
+            maybeShowFirstRunHint()
         }
     }
 
@@ -297,15 +316,80 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
     override fun onPause() {
         handler.removeCallbacks(saveRunnable)
+        handler.removeCallbacks(batteryTick)
+        handler.removeCallbacks(hideFirstHint)
         saveProgressNow()
         // 书库是异步写盘的，退出前等它落地，避免刚翻完页就切后台丢进度
         store.flush()
         super.onPause()
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshBattery(reschedule = true)
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(saveRunnable)
+        handler.removeCallbacks(batteryTick)
+        handler.removeCallbacks(hideFirstHint)
         super.onDestroy()
+    }
+
+    // ---------------- 电量 / 首次提示 ----------------
+
+    /**
+     * 查一次电量并刷到页脚。电量是分钟级变化的低频信息，60s 轮询足够；
+     * 跌破 15% 只 toast 一次，回升到 25% 以上重置，下次跌破还会提醒。
+     */
+    private fun refreshBattery(reschedule: Boolean) {
+        val bat = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = bat?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = bat?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val pct = if (level >= 0 && scale > 0) level * 100 / scale else -1
+        if (pct != batteryPct) {
+            batteryPct = pct
+            pageView.batteryPct = pct
+            pageView.invalidate()
+            if (pct in 1..15 && !lowBatteryToasted) {
+                lowBatteryToasted = true
+                toast("电量只剩 $pct%，记得充电")
+            } else if (pct > 25) {
+                lowBatteryToasted = false
+            }
+        }
+        if (reschedule) handler.postDelayed(batteryTick, 60_000L)
+    }
+
+    /**
+     * 第一次进阅读界面的按键提示。只出现一次（SP 标记），任意按键或 4 秒后消失，
+     * 不打断操作 —— 第一次按键既关提示又照常执行动作。
+     */
+    private fun maybeShowFirstRunHint() {
+        val sp = getSharedPreferences("reader_settings", Context.MODE_PRIVATE)
+        if (sp.getBoolean("first_hint_shown", false)) return
+        sp.edit().putBoolean("first_hint_shown", true).apply()
+        // 键名按当前映射动态取，用户改过键提示也不会说谎
+        val nextKey = Keymap.name(Keymap.codeOf(Gamepad.Action.NEXT_PAGE))
+        val menuKey = Keymap.name(Keymap.codeOf(Gamepad.Action.TOGGLE_MENU))
+        tvFirstHint.text = "十字键 翻页　·　$nextKey 下一页\n$menuKey 菜单　·　B 连按两次返回书架"
+        tvFirstHint.alpha = 1f
+        tvFirstHint.visibility = View.VISIBLE
+        handler.postDelayed(hideFirstHint, 4000L)
+    }
+
+    private val hideFirstHint = Runnable {
+        tvFirstHint.animate().alpha(0f).setDuration(400L)
+            .withEndAction { tvFirstHint.visibility = View.GONE }.start()
+    }
+
+    private fun dismissFirstHint() {
+        handler.removeCallbacks(hideFirstHint)
+        if (tvFirstHint.visibility == View.VISIBLE) {
+            tvFirstHint.animate().cancel()
+            tvFirstHint.alpha = 0f
+            tvFirstHint.visibility = View.GONE
+        }
     }
 
     // ---------------- PageView.Listener ----------------
@@ -441,11 +525,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 val q = s?.toString()?.trim() ?: ""
-                if (q.isNotEmpty()) runSearch(q)
+                handler.removeCallbacks(searchDebounceRunnable)
+                if (q.isNotEmpty()) handler.postDelayed(searchDebounceRunnable, 250)
             }
         })
         searchInput.setOnEditorActionListener { _, id, _ ->
             if (id == EditorInfo.IME_ACTION_SEARCH) {
+                handler.removeCallbacks(searchDebounceRunnable)
                 runSearch(searchInput.text.toString().trim())
                 getSystemService(InputMethodManager::class.java)
                     ?.hideSoftInputFromWindow(searchInput.windowToken, 0)
@@ -480,6 +566,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     }
 
     private fun hideSearch() {
+        handler.removeCallbacks(searchDebounceRunnable)
         searchOverlay.visibility = View.GONE
         getSystemService(InputMethodManager::class.java)
             ?.hideSoftInputFromWindow(searchInput.windowToken, 0)
@@ -570,7 +657,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         if (b.bookmarks.isEmpty()) { toast("还没有书签"); return }
         val marks = b.bookmarks
         val labels = marks.map { it.preview.ifEmpty { "（空）" } }.toTypedArray()
-        showListDialog("书签（${marks.size}）", labels, "全部清除", {
+        showListDialog("书签（${marks.size}）", labels, "全部清除", { dlg ->
             // 手柄的焦点从列表按到底很容易滑到「全部清除」上，误按一次就全没了。
             // 所以第一次只提示，2.5 秒内再按一次才真的清空
             val now = SystemClock.uptimeMillis()
@@ -584,6 +671,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                     book = store.find(cur.id)
                 }
                 toast("已清空书签")
+                // 必须关掉弹窗：列表数据是打开时的快照，不清的话看起来像「没清掉」，
+                // 点旧条目还会按已失效的偏移跳转
+                dlg.dismiss()
             }
         }) { which ->
             val off = marks[which].offset
@@ -649,7 +739,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 override fun onStopTrackingTouch(s: SeekBar?) { onCommit(latest) }
             })
             // 手柄左右键：SeekBar 自己会挪进度，但**不会**回调 onStopTrackingTouch，
-            // 不在这里提交的话只有标签在变、设置其实没生效
+            // 不在这里提交的话只有标签在变、设置其实没生效。
+            // 但不能每按一下就提交 —— 一次提交就是一整章重排，长按把行距从 85% 调到
+            // 200% 会连排二十多次。所以按住时只更新标签，300ms 内的连按合并成最后一次提交。
+            var pendingCommit: Runnable? = null
             sb.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 val step = when (keyCode) {
@@ -660,7 +753,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 val np = (sb.progress + step).coerceIn(0, sb.max)
                 if (np == sb.progress) return@setOnKeyListener true
                 sb.progress = np
-                onCommit(np + min)
+                pendingCommit?.let { handler.removeCallbacks(it) }
+                val commit = Runnable { onCommit(np + min) }
+                pendingCommit = commit
+                handler.postDelayed(commit, 300)
                 true
             }
             sb.setOnFocusChangeListener { v, hasFocus ->
@@ -725,6 +821,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         toggle(right, "页眉页脚", settings.showStatusBar) { on -> applySettings(settings.copy(showStatusBar = on)) }
         toggle(right, "按句分段", settings.sentenceSegments) { on ->
             applySettings(settings.copy(sentenceSegments = on))
+        }
+        toggle(right, "音量键翻页", settings.volumeKeyTurn) { on ->
+            applySettings(settings.copy(volumeKeyTurn = on))
         }
 
         title(right, "跳转")
@@ -815,22 +914,27 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                         refreshKeyRows()
                         toast("${Keymap.label(cap)} → ${Keymap.name(keyCode)}")
                     }
+                    // 按了十字键这类不可绑的键：不提示的话行会一直停在「按任意键…」，
+                    // 用户不知道为什么没反应
+                    else -> toast("十字键和 B 是基础键，不能改绑")
                 }
                 return@setOnKeyListener true
             }
 
-            if (keyCode == KeyEvent.KEYCODE_BUTTON_A ||
-                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                keyCode == KeyEvent.KEYCODE_ENTER
-            ) {
-                val focused = dlg.window?.decorView?.findFocus()
-                if (focused != null && focused !== dlg.window?.decorView) {
-                    focused.performClick(); true
-                } else {
-                    false
+            when (keyCode) {
+                // B 关闭面板：书库弹窗、菜单层都是「B = 关闭」，设置页不能例外
+                KeyEvent.KEYCODE_BUTTON_B -> { dlg.dismiss(); true }
+                KeyEvent.KEYCODE_BUTTON_A,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> {
+                    val focused = dlg.window?.decorView?.findFocus()
+                    if (focused != null && focused !== dlg.window?.decorView) {
+                        focused.performClick(); true
+                    } else {
+                        false
+                    }
                 }
-            } else {
-                false
+                else -> false
             }
         }
         barButton("跳到该位置") {
@@ -888,7 +992,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         title: String,
         items: Array<String>,
         neutralText: String? = null,
-        onNeutral: (() -> Unit)? = null,
+        onNeutral: ((Dialog) -> Unit)? = null,
         initialSelection: Int = -1,
         onPick: (Int) -> Unit
     ) {
@@ -937,7 +1041,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         }
         val dlg = Dialog(this)
         if (neutralText != null) {
-            bar.addView(barButton(neutralText) { onNeutral?.invoke() })
+            barButton(neutralText) { onNeutral?.invoke(dlg) }
         }
         bar.addView(barButton("关闭") { dlg.dismiss() })
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (48 * dm.density).toInt()))
@@ -966,33 +1070,35 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             }
         }
         // 手柄 A 不是 ENTER，ListView 不认：焦点在列表上就当成"选中当前项"，
-        // 焦点在按钮上就点击按钮。目录、书签两个弹窗都走这里
+        // 焦点在按钮上就点击按钮。目录、书签两个弹窗都走这里。
+        // B 关闭 —— 书库弹窗、菜单层、设置面板都是 B = 关闭，这里不能例外
         dlg.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (keyCode == KeyEvent.KEYCODE_BUTTON_A ||
-                    keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                    keyCode == KeyEvent.KEYCODE_ENTER)
-            ) {
-                val focused = dlg.window?.decorView?.findFocus()
-                when {
-                    // hasFocus() 比 findFocus() 实例比对可靠：焦点可能落在列表的子树里
-                    list.hasFocus() -> {
-                        val pos = list.selectedItemPosition
-                        if (pos in items.indices) {
-                            onPick(pos)
-                            dlg.dismiss()
-                            true
-                        } else {
-                            false
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_BUTTON_B -> { dlg.dismiss(); true }
+                KeyEvent.KEYCODE_BUTTON_A,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> {
+                    val focused = dlg.window?.decorView?.findFocus()
+                    when {
+                        // hasFocus() 比 findFocus() 实例比对可靠：焦点可能落在列表的子树里
+                        list.hasFocus() -> {
+                            val pos = list.selectedItemPosition
+                            if (pos in items.indices) {
+                                onPick(pos)
+                                dlg.dismiss()
+                                true
+                            } else {
+                                false
+                            }
                         }
+                        focused != null && focused !== dlg.window?.decorView -> {
+                            focused.performClick(); true
+                        }
+                        else -> false
                     }
-                    focused != null && focused !== dlg.window?.decorView -> {
-                        focused.performClick(); true
-                    }
-                    else -> false
                 }
-            } else {
-                false
+                else -> false
             }
         }
         list.setOnItemClickListener { _, _, pos, _ ->
@@ -1028,6 +1134,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     // ---------------- 按键 ----------------
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 首次提示浮层显示时，任意按下键让它消失，但继续正常处理该键
+        if (::tvFirstHint.isInitialized && tvFirstHint.visibility == View.VISIBLE &&
+            event.action == KeyEvent.ACTION_DOWN
+        ) {
+            dismissFirstHint()
+        }
+
         // 搜索层打开时，B/BACK 收起；其余按键交给系统处理列表导航与文字输入
         if (::searchOverlay.isInitialized && searchOverlay.visibility == View.VISIBLE) {
             if (event.action == KeyEvent.ACTION_DOWN &&
@@ -1056,30 +1169,55 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             return super.dispatchKeyEvent(event)
         }
 
+        // 音量键翻页（设置里可开）：音量+ 上一页、音量- 下一页，与多数阅读器一致；
+        // 连按不连发（音量键长按没有连翻需求），repeat 也吞掉避免中途响音量
+        if (settings.volumeKeyTurn &&
+            (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val a = if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                    Gamepad.Action.PREV_PAGE
+                } else {
+                    Gamepad.Action.NEXT_PAGE
+                }
+                handleAction(a)
+            }
+            return true
+        }
+
         val action = Gamepad.actionOf(event.keyCode) ?: return super.dispatchKeyEvent(event)
 
         if (event.action == KeyEvent.ACTION_DOWN) {
             val now = SystemClock.uptimeMillis()
             if (event.repeatCount > 0) {
                 if (!Gamepad.isRepeatable(action)) return true
-                if (now - lastKeyAt < Gamepad.REPEAT_INTERVAL_MS) return true
+                if (now - lastKeyAt < Gamepad.repeatIntervalMs(action)) return true
             } else if (!Gamepad.isRepeatable(action)) {
                 if (now - (lastActionAt[action] ?: 0L) < Gamepad.debounceMs(action)) return true
                 lastActionAt[action] = now
             }
             lastKeyAt = now
-            if (handleAction(action)) return true
+            if (handleAction(action, event.repeatCount > 0)) return true
         }
         if (event.action == KeyEvent.ACTION_UP) return true
         return super.dispatchKeyEvent(event)
     }
 
-    private fun handleAction(a: Gamepad.Action): Boolean {
+    private fun handleAction(a: Gamepad.Action, fromRepeat: Boolean = false): Boolean {
         when (a) {
-            Gamepad.Action.PREV_PAGE -> pageView.prevPage()
-            Gamepad.Action.NEXT_PAGE -> pageView.nextPage()
-            Gamepad.Action.PREV_CHAPTER -> openChapter(chapterIndex - 1, chapters.getOrElse(chapterIndex - 1) { chapters.first() }.start)
-            Gamepad.Action.NEXT_CHAPTER -> openChapter(chapterIndex + 1, chapters.getOrElse(chapterIndex + 1) { chapters.last() }.start)
+            Gamepad.Action.PREV_PAGE -> pageView.prevPage(animated = !fromRepeat)
+            Gamepad.Action.NEXT_PAGE -> pageView.nextPage(animated = !fromRepeat)
+            Gamepad.Action.PREV_CHAPTER -> {
+                if (chapters.isEmpty()) return true
+                // 边界要给反馈：翻页路径越界有 toast，这里静默重开当前章会闪一下还没解释
+                if (chapterIndex > 0) openChapter(chapterIndex - 1, chapters[chapterIndex - 1].start)
+                else toast("已经是第一章了")
+            }
+            Gamepad.Action.NEXT_CHAPTER -> {
+                if (chapters.isEmpty()) return true
+                if (chapterIndex + 1 < chapters.size) openChapter(chapterIndex + 1, chapters[chapterIndex + 1].start)
+                else toast("已经是最后一章了")
+            }
             Gamepad.Action.TOGGLE_TOC -> showToc()
             Gamepad.Action.FIND -> showSearch()
             Gamepad.Action.ADD_BOOKMARK -> addBookmark()
@@ -1099,7 +1237,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
      * 后退的双击验证：第一下只提示，[EXIT_CONFIRM_MS] 内再按一次才退回书架。
      * 单手阅读时 B 很容易误触，直接退出会丢掉当前阅读节奏。
      */
-    private fun requestExit() {
+    private fun requestExit(hint: String = "再按一次 B 返回书架") {
         val now = SystemClock.uptimeMillis()
         if (now - lastBackPressAt <= EXIT_CONFIRM_MS) {
             lastBackPressAt = 0L
@@ -1107,7 +1245,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             return
         }
         lastBackPressAt = now
-        toast("再按一次 B 返回书架")
+        toast(hint)
     }
 
     private fun toast(msg: String) {

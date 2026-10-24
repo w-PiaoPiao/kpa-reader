@@ -1,6 +1,7 @@
 package com.kpa.reader
 
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
@@ -63,6 +64,10 @@ class MainActivity : AppCompatActivity() {
     private var selectedPos = 0
     private val dateFmt = SimpleDateFormat("MM-dd", Locale.getDefault())
 
+    /** 书架排序。切换存 SharedPreferences，跨启动记住 */
+    private enum class Sort(val label: String) { LAST_READ("最近阅读"), ADDED("加入时间"), TITLE("书名") }
+    private var sort = Sort.LAST_READ
+
     private val clockHandler = Handler(Looper.getMainLooper())
     private val clockTick = object : Runnable {
         override fun run() {
@@ -88,6 +93,8 @@ class MainActivity : AppCompatActivity() {
 
         store = BookStore.get(this)
         Keymap.init(this)
+        sort = runCatching { Sort.valueOf(sortPrefs().getString("shelf_sort", null) ?: "") }
+            .getOrDefault(Sort.LAST_READ)
         recycler = findViewById(R.id.recycler)
         emptyView = findViewById(R.id.emptyView)
         infoPanel = findViewById(R.id.infoPanel)
@@ -110,7 +117,6 @@ class MainActivity : AppCompatActivity() {
             }
         )
         recycler.adapter = adapter
-
         // 选中卡锁死屏幕正中：左右 padding = (屏宽-卡宽)/2（clipToPadding 已关）。
         // 这样 scroll=0 时第一张就正好居中，其余每本都能滚到正中 ——
         // padding 再小，前面几本书就需要负向滚动（不可达），永远差一截。
@@ -132,6 +138,8 @@ class MainActivity : AppCompatActivity() {
             runCatching { picker.launch(intent) }
         }
         findViewById<View>(R.id.btnHelp).setOnClickListener { showHelp() }
+        updateSortLabel()
+        findViewById<View>(R.id.btnSort).setOnClickListener { cycleSort() }
 
         handleExternalIntent(intent)
     }
@@ -159,8 +167,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        val list = store.all()
-        adapter.submit(list)
+        val list = sortedBooks()
+        adapter.submit(list, continuePosition(list))
         emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
         infoPanel.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
         hintBar.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
@@ -173,6 +181,36 @@ class MainActivity : AppCompatActivity() {
         // submit 之后必须等这一轮 layout 跑完才有 ViewHolder 可聚焦 ——
         // 普通 post 排在 vsync 的 doFrame 之前，会拿到 null，焦点就被顶栏按钮抢走
         recycler.doOnNextLayout { recycler.post { focusSelected() } }
+    }
+
+    private fun sortPrefs() =
+        getSharedPreferences("reader_settings", Context.MODE_PRIVATE)
+
+    private fun sortedBooks(): List<Book> = when (sort) {
+        // store.all() 本身就按 lastReadAt 降序
+        Sort.LAST_READ -> store.all()
+        Sort.ADDED -> store.all().sortedByDescending { it.addedAt }
+        Sort.TITLE -> {
+            val cmp = java.text.Collator.getInstance(Locale.CHINA)
+            store.all().sortedWith { a, b -> cmp.compare(a.title, b.title) }
+        }
+    }
+
+    /** 「继续」角标挂最近在读且没读完的那本，排序换了也不能挂错卡 */
+    private fun continuePosition(list: List<Book>): Int =
+        list.indexOfFirst { !it.finished && it.progressPercent < 1f && it.lastReadAt > 0 }
+
+    private fun updateSortLabel() {
+        findViewById<TextView>(R.id.btnSort).text = "排序·${sort.label}"
+    }
+
+    private fun cycleSort() {
+        sort = Sort.entries[(sort.ordinal + 1) % Sort.entries.size]
+        sortPrefs().edit().putString("shelf_sort", sort.name).apply()
+        updateSortLabel()
+        selectedPos = 0
+        refresh()
+        toast("按${sort.label}排序")
     }
 
     private fun focusSelected() {
@@ -368,6 +406,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("· 十字键选书，A 键打开")
             appendLine("· X 键删除（触摸长按卡片也可以）")
             appendLine("· L1/R1 整屏翻动")
+            appendLine("· 顶栏「排序」切换排序方式")
             appendLine("· Y 键看本说明")
             appendLine()
             appendLine("【阅读中】")
@@ -396,6 +435,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 KeyEvent.KEYCODE_BUTTON_Y -> {
                     if (event.repeatCount == 0) showHelp()
+                    return true
+                }
+                KeyEvent.KEYCODE_BUTTON_B -> {
+                    // B 在书库 = 从顶栏回到当前选中的书（和下键同一条路）；
+                    // 卡片行里保持无操作，别让误触把选中书顶乱
+                    if (!inCardRow) focusSelected()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {

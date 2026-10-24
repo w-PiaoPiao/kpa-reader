@@ -64,6 +64,7 @@ class PageView @JvmOverloads constructor(
         hinting = Paint.HINTING_ON
     }
     private val chromePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { isSubpixelText = true }
+    private val batteryPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ghostPaint = Paint()
     private val imagePaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val placeholderPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -114,6 +115,9 @@ class PageView @JvmOverloads constructor(
             if (field != value) { field = value; invalidate() }
         }
 
+    /** 页脚电量百分比；-1 表示未知不画（沉浸阅读没有系统状态栏，电量只有这里能看到） */
+    var batteryPct = -1
+
     // ---------------- 配置 ----------------
 
     fun configure(settings: ReaderSettings, @Suppress("UNUSED_PARAMETER") bookTitle: String) {
@@ -136,6 +140,7 @@ class PageView @JvmOverloads constructor(
         chromePaint.typeface = Typeface.SANS_SERIF
         chromePaint.textSize = 10.5f * scaledDensity
         chromePaint.color = settings.theme.sub
+        batteryPaint.color = settings.theme.sub
         placeholderPaint.color = settings.theme.sub
         placeholderPaint.alpha = 40
     }
@@ -245,24 +250,38 @@ class PageView @JvmOverloads constructor(
 
     // ---------------- 翻页 ----------------
 
-    fun nextPage(): Boolean {
+    fun nextPage(animated: Boolean = true): Boolean {
         if (pages.isEmpty()) return false
         if (pageIndex + 1 >= pages.size) return listener?.onBoundary(true) == true
-        captureGhost()
-        pageIndex++
-        buildPage()
-        startFlip(forward = true)
+        if (animated) {
+            captureGhost()
+            pageIndex++
+            buildPage()
+            startFlip(forward = true)
+        } else {
+            // 连发路径不拍 ghost：170ms 的滑动动画会被 80ms 的连发节奏反复打断，
+            // 残影看起来像在原地抖，直接硬切反而干净
+            pageIndex++
+            buildPage()
+            invalidate()
+        }
         listener?.onPageChanged(pageIndex, pages.size)
         return true
     }
 
-    fun prevPage(): Boolean {
+    fun prevPage(animated: Boolean = true): Boolean {
         if (pages.isEmpty()) return false
         if (pageIndex - 1 < 0) return listener?.onBoundary(false) == true
-        captureGhost()
-        pageIndex--
-        buildPage()
-        startFlip(forward = false)
+        if (animated) {
+            captureGhost()
+            pageIndex--
+            buildPage()
+            startFlip(forward = false)
+        } else {
+            pageIndex--
+            buildPage()
+            invalidate()
+        }
         listener?.onPageChanged(pageIndex, pages.size)
         return true
     }
@@ -386,6 +405,11 @@ class PageView @JvmOverloads constructor(
         val pctText = "${(overallPercent * 100f).roundToInt().coerceIn(0, 100)}%"
         canvas.drawText(pctText, width - padH - chromePaint.measureText(pctText), footerY, chromePaint)
 
+        if (batteryPct in 0..100) {
+            val batRight = width - padH - chromePaint.measureText(pctText) - 10 * density
+            drawBattery(canvas, batRight, footerY - chromePaint.textSize * 0.18f)
+        }
+
         // 页脚细线 + 已读部分高亮，一眼能看出读到全书的哪个位置
         val lineY = footerY - chromePaint.textSize * 1.35f
         val oldAlpha = chromePaint.alpha
@@ -397,6 +421,33 @@ class PageView @JvmOverloads constructor(
             canvas.drawRect(padH.toFloat(), lineY, padH + filled, lineY + 1.5f, chromePaint)
         }
         chromePaint.alpha = oldAlpha
+    }
+
+    /** 在 [right]/[bottom]（右下角锚点）画一枚按电量填充的小电池 */
+    private fun drawBattery(canvas: Canvas, right: Float, bottom: Float) {
+        val w = 15 * density
+        val h = 8.5f * density
+        val capW = 2 * density
+        val stroke = density
+        val left = right - w - capW
+        val top = bottom - h
+
+        batteryPaint.style = Paint.Style.STROKE
+        batteryPaint.strokeWidth = stroke
+        canvas.drawRoundRect(left, top, left + w, bottom, 2 * density, 2 * density, batteryPaint)
+
+        batteryPaint.style = Paint.Style.FILL
+        canvas.drawRect(
+            left + w, top + h * 0.28f,
+            left + w + capW, bottom - h * 0.28f, batteryPaint
+        )
+        val innerW = (w - stroke * 4) * (batteryPct / 100f)
+        if (innerW > 0) {
+            canvas.drawRect(
+                left + stroke * 2, top + stroke * 2,
+                left + stroke * 2 + innerW, bottom - stroke * 2, batteryPaint
+            )
+        }
     }
 
     private fun ellipsize(text: String, maxWidth: Float): String {
