@@ -31,50 +31,45 @@ object Gamepad {
         BACK
     }
 
-    fun actionOf(keyCode: Int): Action? = when (keyCode) {
-        // 翻页：十字键左右 / R1 / 翻页键（L1 已改为加书签，上一页靠十字键）
-        KeyEvent.KEYCODE_DPAD_LEFT,
-        KeyEvent.KEYCODE_DPAD_UP,
-        KeyEvent.KEYCODE_PAGE_UP -> Action.PREV_PAGE
+    /**
+     * 键码 → 动作。
+     *
+     * 先查用户自定义映射（[Keymap]），再落到固定键：十字键翻页、BACK 后退、
+     * 以及外接键盘的辅助键。固定键不可自定义 —— 那是导航基础，
+     * 改坏了连设置页都退不出去。
+     */
+    fun actionOf(keyCode: Int): Action? {
+        Keymap.actionFor(keyCode)?.let { return it }
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_PAGE_UP -> Action.PREV_PAGE
 
-        KeyEvent.KEYCODE_DPAD_RIGHT,
-        KeyEvent.KEYCODE_DPAD_DOWN,
-        KeyEvent.KEYCODE_BUTTON_A,
-        KeyEvent.KEYCODE_BUTTON_R1,
-        KeyEvent.KEYCODE_PAGE_DOWN,
-        KeyEvent.KEYCODE_SPACE,
-        KeyEvent.KEYCODE_ENTER,
-        KeyEvent.KEYCODE_DPAD_CENTER -> Action.NEXT_PAGE
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_PAGE_DOWN,
+            KeyEvent.KEYCODE_SPACE,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_DPAD_CENTER -> Action.NEXT_PAGE
 
-        // 章：R2 下一章；上一章没有专属键，翻到章首再按下页即可跨章，
-        // 或者从目录（X）直接跳
-        KeyEvent.KEYCODE_BUTTON_R2 -> Action.NEXT_CHAPTER
+            // 外接键盘辅助键，不影响手柄
+            KeyEvent.KEYCODE_F -> Action.FIND
+            KeyEvent.KEYCODE_MENU -> Action.TOGGLE_MENU
+            KeyEvent.KEYCODE_N -> Action.TOGGLE_NIGHT
+            KeyEvent.KEYCODE_MINUS,
+            KeyEvent.KEYCODE_LEFT_BRACKET -> Action.FONT_DOWN
+            KeyEvent.KEYCODE_PLUS,
+            KeyEvent.KEYCODE_RIGHT_BRACKET,
+            KeyEvent.KEYCODE_EQUALS -> Action.FONT_UP
 
-        // 功能
-        KeyEvent.KEYCODE_BUTTON_L1 -> Action.ADD_BOOKMARK
-        KeyEvent.KEYCODE_BUTTON_L2 -> Action.SHOW_BOOKMARKS
-        KeyEvent.KEYCODE_BUTTON_X -> Action.TOGGLE_TOC
-        KeyEvent.KEYCODE_BUTTON_Y,
-        KeyEvent.KEYCODE_F -> Action.FIND
-        KeyEvent.KEYCODE_BUTTON_START,
-        KeyEvent.KEYCODE_MENU -> Action.TOGGLE_MENU
+            // B 默认是后退；若用户把它绑给了别的动作，上面查表已经命中，
+            // 这里就轮不到 —— 那种情况后退还有系统返回键
+            KeyEvent.KEYCODE_BUTTON_B,
+            KeyEvent.KEYCODE_BACK,
+            KeyEvent.KEYCODE_ESCAPE -> Action.BACK
 
-        KeyEvent.KEYCODE_BUTTON_SELECT,
-        KeyEvent.KEYCODE_N -> Action.TOGGLE_NIGHT
-
-        KeyEvent.KEYCODE_MINUS,
-        KeyEvent.KEYCODE_LEFT_BRACKET -> Action.FONT_DOWN
-
-        KeyEvent.KEYCODE_PLUS,
-        KeyEvent.KEYCODE_RIGHT_BRACKET,
-        KeyEvent.KEYCODE_EQUALS -> Action.FONT_UP
-
-        // 后退：B 不再翻页，改为返回（需双击确认，见 ReaderActivity）
-        KeyEvent.KEYCODE_BUTTON_B,
-        KeyEvent.KEYCODE_BACK,
-        KeyEvent.KEYCODE_ESCAPE -> Action.BACK
-
-        else -> null
+            else -> null
+        }
     }
 
     /** 哪些动作允许长按连发 */
@@ -100,18 +95,18 @@ object Gamepad {
     /** 连发间隔（毫秒）——掌机按键回弹快，80ms 左右连翻手感刚好 */
     const val REPEAT_INTERVAL_MS = 80L
 
-    /** 按键提示文案，用于阅读器内的帮助浮层 */
-    val HELP_LINES: List<Pair<String, String>> = listOf(
-        "十字键 ← → / ↑ ↓" to "上一页 / 下一页",
-        "A / R1" to "下一页",
-        "R2" to "下一章",
-        "L1" to "加书签",
-        "L2" to "书签列表",
-        "X" to "目录",
-        "Y" to "全文搜索",
-        "START" to "菜单（跳转、字号、主题、设置）",
-        "SELECT" to "夜间模式",
-        "B" to "后退（连按两次返回书架）",
-        "触摸" to "左/右侧点击翻页，中间呼出菜单"
-    )
+    /**
+     * 按键提示文案。按当前映射动态生成，用户在设置里改过键之后帮助也对得上。
+     */
+    fun helpLines(): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>(14)
+        out.add("十字键" to "上下左右翻页")
+        for (a in Keymap.BINDABLE) {
+            val code = Keymap.codeOf(a)
+            if (code != Keymap.UNBOUND) out.add(Keymap.name(code) to Keymap.label(a))
+        }
+        out.add("B" to "后退（连按两次返回书架）")
+        out.add("触摸" to "左右点击翻页，中间呼出菜单")
+        return out
+    }
 }

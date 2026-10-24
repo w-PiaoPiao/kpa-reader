@@ -20,11 +20,16 @@
 - 没有 Gradle wrapper（国内拉不到 distribution），一律 `./build.sh`。
 - 签名证书与密码在 `local.properties` + 本地 `release.keystore`，**都不入库**。
 
-## 掌机按键（v1.6.0 起）
+## 掌机按键（v1.6.1 起，可在设置里改绑）
 
-十字键翻页 / A·R1 下页 / R2 下章 / **L1 加书签** / **L2 书签列表** /
-X 目录 / Y 搜索 / START 菜单 / SELECT 夜间 / **B 后退（双击确认）**。
-上一章无专属键：章首再按上一页会跨章。
+默认映射：
+十字键翻页（固定）/ **A 下页** / **R1 下章** / **R2 上章** / **L1 加书签** /
+**L2 书签列表** / X 目录 / Y 搜索 / START 菜单 / SELECT 夜间 / **B 后退（双击确认）**。
+
+- 可自定义：A / X / Y / L1 / R1 / L2 / R2 / START / SELECT（`input/Keymap.kt`）
+- **不可自定义**：十字键（导航基础）、B（后退键，捕获时也用作取消）
+- 绑定到已占用的键会与对方**交换**，不会让任何动作变成"未设置"
+- 存储：SharedPreferences `reader_keys`，键名是 Action 枚举名
 
 ## 文档分工
 

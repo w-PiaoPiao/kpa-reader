@@ -46,6 +46,7 @@ import com.kpa.reader.data.ReaderTheme
 import com.kpa.reader.data.SettingsStore
 import com.kpa.reader.doc.Document
 import com.kpa.reader.input.Gamepad
+import com.kpa.reader.input.Keymap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -120,6 +121,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         }
 
         store = BookStore.get(this)
+        Keymap.init(this)
         settingsStore = SettingsStore(this)
         settings = settingsStore.load()
         // 窗口底色跟随阅读主题，避免进入时先闪一下深色底再变纸白
@@ -754,14 +756,72 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         jumpRow.addView(jumpSb, LinearLayout.LayoutParams(0, (30 * d).toInt(), 1f))
         right.addView(jumpRow)
 
+        // ---- 按键 ----
+        title(right, "按键（方向键选中后按 A 改绑，B 取消）")
+        val keyRows = LinkedHashMap<Gamepad.Action, TextView>()
+        var capturing: Gamepad.Action? = null
+
+        fun refreshKeyRows() {
+            keyRows.forEach { (a, tv) ->
+                tv.text = if (capturing == a) {
+                    "${Keymap.label(a)}　—　按任意键…"
+                } else {
+                    "${Keymap.label(a)}　—　${Keymap.name(Keymap.codeOf(a))}"
+                }
+            }
+        }
+
+        fun keyRow(action: Gamepad.Action) {
+            val tv = TextView(this).apply {
+                textSize = 12f
+                setTextColor(0xFFE2E7EE.toInt())
+                setPadding((8 * d).toInt(), (7 * d).toInt(), (8 * d).toInt(), (7 * d).toInt())
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setOnFocusChangeListener { v, hasFocus ->
+                    v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+                }
+                setOnClickListener {
+                    capturing = action
+                    refreshKeyRows()
+                    toast("按下要绑定的键，B 取消")
+                }
+            }
+            right.addView(tv)
+            keyRows[action] = tv
+        }
+
+        for (action in Keymap.BINDABLE) keyRow(action)
+        refreshKeyRows()
+
         val dlg = Dialog(this)
         // Dialog 有独立的 window，Activity 的按键逻辑进不来：
         // 手柄 A 不是 ENTER，所以要在这里把它转成「点击当前焦点控件」
         dlg.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (keyCode == KeyEvent.KEYCODE_BUTTON_A ||
-                    keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                    keyCode == KeyEvent.KEYCODE_ENTER)
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+
+            // 捕获模式优先：此时按下的键是要绑定的目标，不触发控件点击
+            val cap = capturing
+            if (cap != null) {
+                when {
+                    keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_BUTTON_B -> {
+                        capturing = null
+                        refreshKeyRows()
+                        toast("已取消")
+                    }
+                    Keymap.canBind(keyCode) -> {
+                        Keymap.bind(cap, keyCode)
+                        capturing = null
+                        refreshKeyRows()
+                        toast("${Keymap.label(cap)} → ${Keymap.name(keyCode)}")
+                    }
+                }
+                return@setOnKeyListener true
+            }
+
+            if (keyCode == KeyEvent.KEYCODE_BUTTON_A ||
+                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                keyCode == KeyEvent.KEYCODE_ENTER
             ) {
                 val focused = dlg.window?.decorView?.findFocus()
                 if (focused != null && focused !== dlg.window?.decorView) {

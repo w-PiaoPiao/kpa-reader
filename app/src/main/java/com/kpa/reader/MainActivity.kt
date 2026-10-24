@@ -19,6 +19,7 @@ import com.kpa.reader.book.BookImporter
 import com.kpa.reader.data.Book
 import com.kpa.reader.data.BookStore
 import com.kpa.reader.input.Gamepad
+import com.kpa.reader.input.Keymap
 import com.kpa.reader.ui.ReaderActivity
 import com.kpa.reader.ui.ShelfAdapter
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         store = BookStore.get(this)
+        Keymap.init(this)
         recycler = findViewById(R.id.recycler)
         emptyView = findViewById(R.id.emptyView)
 
@@ -183,7 +185,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("· 长按菜单键（或触摸长按卡片）删除")
             appendLine()
             appendLine("【阅读中】")
-            Gamepad.HELP_LINES.forEach { (k, v) -> appendLine("· $k　→　$v") }
+            Gamepad.helpLines().forEach { (k, v) -> appendLine("· $k　→　$v") }
         }
         AlertDialog.Builder(this)
             .setTitle("操作说明")
