@@ -1,70 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="176dp"
-    android:layout_margin="5dp"
-    android:background="@drawable/bg_card_sel"
-    android:clickable="true"
-    android:focusable="true"
-    android:focusableInTouchMode="false"
-    android:orientation="vertical"
-    android:padding="8dp">
+<!--
+  书库横排卡片：只有封面本体（3:4 比例），书名等信息在首页底部信息面板显示。
+  横向列表的 item 根必须是 wrap_content（match_parent 会占满整屏宽，一屏只剩一张卡），
+  高度铺满 RecyclerView，卡片在其中垂直居中。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="match_parent">
 
     <FrameLayout
-        android:id="@+id/coverBox"
-        android:layout_width="match_parent"
-        android:layout_height="96dp"
-        android:background="@drawable/bg_cover"
-        android:clipToOutline="true"
-        android:outlineProvider="background">
+        android:id="@+id/cardBox"
+        android:layout_width="104dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:layout_marginHorizontal="5dp"
+        android:background="@drawable/bg_card_sel"
+        android:clickable="true"
+        android:focusable="true"
+        android:focusableInTouchMode="false">
 
-        <ImageView
-            android:id="@+id/ivCover"
+        <FrameLayout
+            android:id="@+id/coverBox"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:contentDescription="@null"
-            android:scaleType="fitCenter" />
+            android:layout_height="139dp"
+            android:background="@drawable/bg_cover"
+            android:clipToOutline="true"
+            android:outlineProvider="background">
+
+            <ImageView
+                android:id="@+id/ivCover"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:scaleType="fitCenter" />
+
+            <TextView
+                android:id="@+id/tvCoverPlaceholder"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="#5FFFFFFF"
+                android:textSize="30sp"
+                android:visibility="gone" />
+
+            <ProgressBar
+                android:id="@+id/pbProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_gravity="bottom"
+                android:max="1000"
+                android:progressBackgroundTint="#262B33"
+                android:progressTint="#7C9CFF" />
+        </FrameLayout>
 
         <TextView
-            android:id="@+id/tvCoverPlaceholder"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:maxLines="1"
-            android:textColor="#5FFFFFFF"
-            android:textSize="34sp"
+            android:id="@+id/tvBadgeContinue"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_margin="4dp"
+            android:background="@drawable/bg_badge_continue"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:text="▶ 继续"
+            android:textColor="#221A04"
+            android:textSize="8sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvBadgeDone"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_margin="4dp"
+            android:background="@drawable/bg_badge_done"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:text="读完"
+            android:textColor="#FFD24A"
+            android:textSize="8sp"
+            android:textStyle="bold"
             android:visibility="gone" />
     </FrameLayout>
-
-    <TextView
-        android:id="@+id/tvTitle"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="6dp"
-        android:layout_weight="1"
-        android:ellipsize="end"
-        android:lineSpacingExtra="1dp"
-        android:maxLines="2"
-        android:textColor="#E6E1D6"
-        android:textSize="12sp" />
-
-    <ProgressBar
-        android:id="@+id/pbProgress"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="3dp"
-        android:layout_marginTop="4dp"
-        android:max="1000"
-        android:progressBackgroundTint="#2A3038"
-        android:progressTint="#D9A441" />
-
-    <TextView
-        android:id="@+id/tvMeta"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textColor="#7B8590"
-        android:textSize="10sp" />
-</LinearLayout>
+</FrameLayout>

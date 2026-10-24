@@ -2,9 +2,21 @@
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#33FFFFFF">
     <item>
-        <shape android:shape="rectangle">
-            <corners android:radius="7dp" />
-            <solid android:color="#D9A441" />
-        </shape>
+        <selector>
+            <!-- 十字键上键会从卡片行跳到顶栏按钮，焦点态要有白描边才看得见 -->
+            <item android:state_focused="true">
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#E6BC5C" />
+                    <stroke android:width="2dp" android:color="#F2F3F5" />
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#D9A441" />
+                </shape>
+            </item>
+        </selector>
     </item>
 </ripple>

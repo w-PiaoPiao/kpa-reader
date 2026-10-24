@@ -1,22 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 书库卡片：Switch 式选中白描边；焦点态不再用金色描边 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">
-            <corners android:radius="8dp" />
-            <solid android:color="#232A33" />
-            <stroke android:width="2dp" android:color="#D9A441" />
+            <corners android:radius="12dp" />
+            <solid android:color="#1F2127" />
+            <stroke android:width="4dp" android:color="#F2F3F5" />
         </shape>
     </item>
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <corners android:radius="8dp" />
+            <corners android:radius="12dp" />
             <solid android:color="#2A323C" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="8dp" />
-            <solid android:color="#1B2129" />
+            <corners android:radius="12dp" />
+            <solid android:color="#1F2127" />
         </shape>
     </item>
 </selector>

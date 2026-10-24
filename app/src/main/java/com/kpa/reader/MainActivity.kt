@@ -2,9 +2,15 @@ package com.kpa.reader
 
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,8 +18,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnLayout
+import androidx.core.view.doOnNextLayout
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.kpa.reader.book.BookImporter
 import com.kpa.reader.data.Book
@@ -25,12 +33,16 @@ import com.kpa.reader.ui.ShelfAdapter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * 书架。
+ * 书库首页：Switch 主机式横排封面卡。
  *
- * 掌机上没有鼠标，整个书架必须能纯用十字键 + A 键操作：
- * item 设为可聚焦，焦点态有金色描边，A 键映射为 performClick。
+ * 掌机上没有鼠标，整个书库必须能纯用十字键 + A 键操作：
+ * 卡片可聚焦，焦点即选中（放大 + 白描边），书名/进度显示在底部信息面板。
+ * L1/R1 整屏翻动，X 删除，Y 看按键说明，A 键映射为 performClick。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -38,6 +50,26 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: ShelfAdapter
     private lateinit var recycler: RecyclerView
     private lateinit var emptyView: View
+    private lateinit var infoPanel: View
+    private lateinit var hintBar: View
+    private lateinit var tvPanelTitle: TextView
+    private lateinit var tvPanelSub: TextView
+    private lateinit var tvPanelPct: TextView
+    private lateinit var tvPanelLast: TextView
+    private lateinit var tvPanelCount: TextView
+    private lateinit var pbPanel: ProgressBar
+
+    /** 面板跟随着焦点走；触屏没有焦点概念，点击即打开，面板停在最后一次选中 */
+    private var selectedPos = 0
+    private val dateFmt = SimpleDateFormat("MM-dd", Locale.getDefault())
+
+    private val clockHandler = Handler(Looper.getMainLooper())
+    private val clockTick = object : Runnable {
+        override fun run() {
+            updateStatus()
+            clockHandler.postDelayed(this, 30_000L)
+        }
+    }
 
     private val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val uri = res.data?.data
@@ -58,14 +90,36 @@ class MainActivity : AppCompatActivity() {
         Keymap.init(this)
         recycler = findViewById(R.id.recycler)
         emptyView = findViewById(R.id.emptyView)
+        infoPanel = findViewById(R.id.infoPanel)
+        hintBar = findViewById(R.id.hintBar)
+        tvPanelTitle = findViewById(R.id.tvPanelTitle)
+        tvPanelSub = findViewById(R.id.tvPanelSub)
+        tvPanelPct = findViewById(R.id.tvPanelPct)
+        tvPanelLast = findViewById(R.id.tvPanelLast)
+        tvPanelCount = findViewById(R.id.tvPanelCount)
+        pbPanel = findViewById(R.id.pbPanel)
 
-        val span = (resources.configuration.screenWidthDp / 150).coerceIn(2, 5)
-        recycler.layoutManager = GridLayoutManager(this, span)
+        recycler.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         adapter = ShelfAdapter(
             onClick = { open(it) },
-            onLongClick = { confirmDelete(it) }
+            onLongClick = { confirmDelete(it) },
+            onFocus = { b, pos ->
+                selectedPos = pos
+                updatePanel(b, pos, adapter.itemCount)
+                smoothCenter(pos)
+            }
         )
         recycler.adapter = adapter
+
+        // 选中卡锁死屏幕正中：左右 padding = (屏宽-卡宽)/2（clipToPadding 已关）。
+        // 这样 scroll=0 时第一张就正好居中，其余每本都能滚到正中 ——
+        // padding 再小，前面几本书就需要负向滚动（不可达），永远差一截。
+        recycler.doOnLayout { rv ->
+            // 卡 104dp + 左右 margin 5dp = 114dp，与 item_book.xml 对应
+            val cardSpan = dp(114)
+            val side = ((rv.width - cardSpan) / 2).coerceAtLeast(dp(16))
+            rv.setPadding(side, 0, side, 0)
+        }
 
         findViewById<View>(R.id.btnImport).setOnClickListener {
             // 不用 OpenDocument 契约：它一定会带上 EXTRA_MIME_TYPES 白名单，
@@ -95,9 +149,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        clockHandler.post(clockTick)
     }
 
     override fun onPause() {
+        clockHandler.removeCallbacks(clockTick)
         store.flush()
         super.onPause()
     }
@@ -106,10 +162,102 @@ class MainActivity : AppCompatActivity() {
         val list = store.all()
         adapter.submit(list)
         emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
-        if (list.isNotEmpty() && recycler.childCount > 0) {
-            recycler.post { recycler.getChildAt(0)?.requestFocus() }
+        infoPanel.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
+        hintBar.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
+        findViewById<TextView>(R.id.tvLibCount).text = "LIBRARY · ${list.size} 本"
+        if (list.isEmpty()) {
+            updatePanel(null, 0, 0)
+            return
         }
+        selectedPos = selectedPos.coerceIn(0, list.size - 1)
+        // submit 之后必须等这一轮 layout 跑完才有 ViewHolder 可聚焦 ——
+        // 普通 post 排在 vsync 的 doFrame 之前，会拿到 null，焦点就被顶栏按钮抢走
+        recycler.doOnNextLayout { recycler.post { focusSelected() } }
     }
+
+    private fun focusSelected() {
+        // 焦点要给卡片本体（cardBox），定位容器不可聚焦
+        recycler.findViewHolderForAdapterPosition(selectedPos)?.itemView
+            ?.findViewById<View>(R.id.cardBox)?.requestFocus()
+        // 触摸模式下 requestFocus 会被吞，面板直接刷，不依赖焦点回调
+        updatePanel(adapter.itemAt(selectedPos), selectedPos, adapter.itemCount)
+    }
+
+    private fun updatePanel(b: Book?, pos: Int, total: Int) {
+        if (b == null) {
+            tvPanelTitle.text = "—"
+            tvPanelSub.text = ""
+            tvPanelPct.text = ""
+            tvPanelLast.text = ""
+            tvPanelCount.text = ""
+            pbPanel.progress = 0
+            return
+        }
+        tvPanelTitle.text = "《${b.title}》"
+        val author = b.author.ifBlank { "佚名" }
+        tvPanelSub.text = "$author · ${b.format.uppercase()} · ${b.chapters.size} 章 · 书签 ${b.bookmarks.size}"
+        tvPanelPct.text = "${(b.progressPercent * 100).toInt().coerceIn(0, 100)}%"
+        tvPanelLast.text = when {
+            b.finished -> "已读完"
+            b.lastReadAt > 0 -> "上次 " + dateFmt.format(Date(b.lastReadAt))
+            else -> "未读过"
+        }
+        tvPanelCount.text = "${pos + 1} / $total"
+        pbPanel.progress = (b.progressPercent * 1000).toInt().coerceIn(0, 1000)
+    }
+
+    /** 顶栏电量 + 时间。掌机沉浸模式没有系统状态栏，书库页自己显示 */
+    private fun updateStatus() {
+        findViewById<TextView>(R.id.tvClock).text =
+            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        val bat = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = bat?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = bat?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val pct = if (level >= 0 && scale > 0) level * 100 / scale else -1
+        findViewById<TextView>(R.id.tvBattery).text = if (pct >= 0) "$pct%" else ""
+    }
+
+    private fun focusedBook(): Book? {
+        val v = recycler.focusedChild ?: return null
+        val pos = recycler.getChildAdapterPosition(v)
+        return if (pos == RecyclerView.NO_POSITION) null else adapter.itemAt(pos)
+    }
+
+    /**
+     * 十字键 / L1R1 全部走这里：把选中挪到 [delta] 方向的卡片，并滚到屏幕正中。
+     * 不交给系统焦点导航 —— 它只会贴边滚，做不到「选中即居中」。
+     */
+    private fun moveSelection(delta: Int) {
+        val n = adapter.itemCount
+        if (n == 0) return
+        val cur = recycler.focusedChild
+            ?.let { recycler.getChildAdapterPosition(it) }
+            ?.takeIf { it != RecyclerView.NO_POSITION }
+            ?: selectedPos
+        val target = (cur + delta).coerceIn(0, n - 1)
+        if (target == cur) return
+        selectedPos = target
+        val vh = recycler.findViewHolderForAdapterPosition(target)
+        if (vh != null) {
+            vh.itemView.findViewById<View>(R.id.cardBox).requestFocus()
+        } else {
+            // 跨页跳转：目标还没布局，先瞬移过去，布局完再补焦点
+            (recycler.layoutManager as LinearLayoutManager).scrollToPosition(target)
+            recycler.post { focusSelected() }
+        }
+        // 触摸模式下 requestFocus 会被吞，面板直接刷，不依赖焦点回调
+        updatePanel(adapter.itemAt(target), target, n)
+    }
+
+    /** 平滑滚动，让 [pos] 那本书停在屏幕正中（焦点回调里调用，目标 view 必定已布局） */
+    private fun smoothCenter(pos: Int) {
+        val target = (recycler.layoutManager as LinearLayoutManager).findViewByPosition(pos) ?: return
+        // 卡中心在屏中心右边 → dx 为正 → 内容左移追上它；反之往回滚
+        val dx = (target.left + target.right) / 2 - recycler.width / 2
+        if (dx != 0) recycler.smoothScrollBy(dx, 0)
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun open(book: Book) {
         startActivity(ReaderActivity.intentOf(this, book.id))
@@ -148,6 +296,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 把异常翻译成人话：用户看到「Not a zip file」只会更困惑 */
     private fun showImportError(e: Throwable) {
+        Log.e(TAG_LOG, "导入失败", e)
         val msg = when {
             e is OutOfMemoryError -> "文件太大，内存不够。可以先压缩图片或换个小一点的版本。"
             e is SecurityException -> "没有读取这个文件的权限，试试把它复制到「下载」目录再导入。"
@@ -157,15 +306,51 @@ class MainActivity : AppCompatActivity() {
             else -> e.message?.takeIf { it.isNotBlank() }
                 ?: "解析失败（${e.javaClass.simpleName}）"
         }
-        AlertDialog.Builder(this)
+        showGamepadDialog(AlertDialog.Builder(this)
             .setTitle("导入失败")
             .setMessage(msg)
-            .setPositiveButton("知道了", null)
-            .show()
+            .setPositiveButton("知道了", null), focusPositive = true)
+    }
+
+    /**
+     * AlertDialog 是独立窗口，Activity 的 dispatchKeyEvent 收不到手柄按键。
+     * 照 ReaderActivity 列表弹窗的做法挂 OnKeyListener：A/确认键 = 点击焦点按钮，B = 关闭。
+     * AlertDialog 默认聚焦的是「删除」这类 destructive 按钮，A 键一下就误删 ——
+     * 所以 [focusPositive] 只给单按钮提示框用，双按钮确认框一律聚焦安全侧（取消）。
+     */
+    private fun showGamepadDialog(builder: AlertDialog.Builder, focusPositive: Boolean = false) {
+        val dlg = builder.create()
+        dlg.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_BUTTON_A,
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER -> {
+                        val focused = dlg.window?.decorView?.findFocus()
+                        if (focused != null && focused !== dlg.window?.decorView) {
+                            focused.performClick()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    KeyEvent.KEYCODE_BUTTON_B -> {
+                        dlg.dismiss()
+                        true
+                    }
+                    else -> false
+                }
+            } else {
+                false
+            }
+        }
+        dlg.show()
+        val target = if (focusPositive) AlertDialog.BUTTON_POSITIVE else AlertDialog.BUTTON_NEGATIVE
+        (dlg.getButton(target) ?: dlg.getButton(AlertDialog.BUTTON_POSITIVE))?.requestFocus()
     }
 
     private fun confirmDelete(book: Book) {
-        AlertDialog.Builder(this)
+        showGamepadDialog(AlertDialog.Builder(this)
             .setTitle("删除")
             .setMessage("从书架移除《${book.title}》？\n（只删本地缓存，原文件不受影响）")
             .setPositiveButton("删除") { _, _ ->
@@ -174,44 +359,77 @@ class MainActivity : AppCompatActivity() {
                 toast("已移除")
                 refresh()
             }
-            .setNegativeButton("取消", null)
-            .show()
+            .setNegativeButton("取消", null))
     }
 
     private fun showHelp() {
         val text = buildString {
-            appendLine("【书架】")
-            appendLine("· 十字键移动焦点，A 键打开")
-            appendLine("· 长按菜单键（或触摸长按卡片）删除")
+            appendLine("【书库】")
+            appendLine("· 十字键选书，A 键打开")
+            appendLine("· X 键删除（触摸长按卡片也可以）")
+            appendLine("· L1/R1 整屏翻动")
+            appendLine("· Y 键看本说明")
             appendLine()
             appendLine("【阅读中】")
             Gamepad.helpLines().forEach { (k, v) -> appendLine("· $k　→　$v") }
         }
-        AlertDialog.Builder(this)
+        showGamepadDialog(AlertDialog.Builder(this)
             .setTitle("操作说明")
             .setMessage(text)
-            .setPositiveButton("知道了", null)
-            .show()
+            .setPositiveButton("知道了", null), focusPositive = true)
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // 手柄 A 键在系统里不是 ENTER，需要手动转成点击
         if (event.action == KeyEvent.ACTION_DOWN) {
-            if (event.keyCode == KeyEvent.KEYCODE_BUTTON_A ||
-                event.keyCode == KeyEvent.KEYCODE_BUTTON_START
-            ) {
-                val focused = currentFocus
-                if (focused != null && event.keyCode == KeyEvent.KEYCODE_BUTTON_A) {
-                    focused.performClick()
+            // 焦点在卡片行里时左右/翻页自己接管（系统只会贴边滚，做不到选中即居中）；
+            // 焦点在顶栏按钮上时左右交还系统，在「按键 / 导入」间切换
+            val inCardRow = recycler.focusedChild != null
+            when (event.keyCode) {
+                // 手柄 A 键在系统里不是 ENTER，需要手动转成点击
+                KeyEvent.KEYCODE_BUTTON_A -> {
+                    currentFocus?.performClick()
                     return true
                 }
-            }
-            if (event.keyCode == KeyEvent.KEYCODE_BUTTON_Y) {
-                showHelp(); return true
+                KeyEvent.KEYCODE_BUTTON_X -> {
+                    if (event.repeatCount == 0 && inCardRow) focusedBook()?.let { confirmDelete(it) }
+                    return true
+                }
+                KeyEvent.KEYCODE_BUTTON_Y -> {
+                    if (event.repeatCount == 0) showHelp()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    if (inCardRow) {
+                        moveSelection(if (event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1)
+                        return true
+                    }
+                    // 顶栏：交给系统
+                }
+                // 上键全程交给系统：卡片行 → 跳上方最近的顶栏按钮
+                KeyEvent.KEYCODE_DPAD_UP -> return super.dispatchKeyEvent(event)
+                // 下键：顶栏回到当前选中的书；卡片行内下移无意义，吞掉防跳去面板
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (!inCardRow) focusSelected()
+                    return true
+                }
+                KeyEvent.KEYCODE_BUTTON_L1 -> {
+                    if (inCardRow) moveSelection(-PAGE_STEP)
+                    return true
+                }
+                KeyEvent.KEYCODE_BUTTON_R1 -> {
+                    if (inCardRow) moveSelection(PAGE_STEP)
+                    return true
+                }
             }
         }
         return super.dispatchKeyEvent(event)
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    companion object {
+        /** L1/R1 一次翻过的卡片数，与一屏可见张数一致 */
+        private const val PAGE_STEP = 5
+        private const val TAG_LOG = "Import"
+    }
 }
