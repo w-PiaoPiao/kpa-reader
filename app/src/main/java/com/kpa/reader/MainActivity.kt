@@ -302,6 +302,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startImport(uri: android.net.Uri) {
+        // 防重入：查重靠 findByUri，导入完成前记录还没落库，连按导入键会并发跑两份
+        if (importing) return
         val existing = store.findByUri(uri.toString())
         if (existing != null) {
             toast("《${existing.title}》已经在书架里了")
@@ -310,11 +312,13 @@ class MainActivity : AppCompatActivity() {
         runCatching {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        importing = true
         setImporting(true, "正在解析…")
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching { BookImporter.import(this@MainActivity, uri) }
             }
+            importing = false
             setImporting(false)
             result.onSuccess { book ->
                 store.upsert(book)
@@ -477,4 +481,7 @@ class MainActivity : AppCompatActivity() {
         private const val PAGE_STEP = 5
         private const val TAG_LOG = "Import"
     }
+
+    /** 导入进行中（主线程读写，lifecycleScope 默认主线程派发） */
+    private var importing = false
 }

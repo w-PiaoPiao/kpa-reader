@@ -30,22 +30,22 @@ object CoverLoader {
     private val main = Handler(Looper.getMainLooper())
 
     /**
-     * [onReady] 一定在主线程回调；没有封面（TXT、书里没图）时回 null，
-     * 由调用方显示占位。
+     * [onReady] 一定在主线程回调（同步路径也 post 一帧，契约才成立）；
+     * 没有封面（TXT、书里没图、文件缺失）时回 null，由调用方显示占位。
      */
     fun load(context: Context, book: Book, onReady: (Bitmap?) -> Unit) {
         if (book.cover.isBlank()) {
-            onReady(null)
+            main.post { onReady(null) }
             return
         }
         val key = "${book.id}@${book.cover}"
         cache.get(key)?.let {
-            onReady(it)
+            main.post { onReady(it) }
             return
         }
         val file = BookImporter.imageFile(context.applicationContext, book.id, book.cover)
         if (!file.exists()) {
-            onReady(null)
+            main.post { onReady(null) }
             return
         }
         pool.execute {
