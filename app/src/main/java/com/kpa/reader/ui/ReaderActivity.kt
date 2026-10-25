@@ -115,6 +115,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private lateinit var searchStatus: TextView
     private var searchResults: List<Hit> = emptyList()
     private var searchAdapter: ArrayAdapter<CharSequence>? = null
+    /** 当前搜索任务：边打边搜时先取消上一个，防止慢的旧词结果回来覆盖新词结果 */
+    private var searchJob: kotlinx.coroutines.Job? = null
 
     /** 边打边搜的 250ms 防抖，统一持有才能在收起搜索层时取消 */
     private val searchDebounceRunnable = Runnable {
@@ -226,7 +228,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             chapters = if (b.chapters.isNotEmpty()) b.chapters else ChapterSplitter.split(doc.text)
 
             pageView.setDocument(doc, imageDir)
-            pageView.configure(settings, b.title)
+            pageView.configure(settings)
 
             if (b.chapters.size != chapters.size) {
                 store.upsert(b.copy(chapters = chapters, charCount = doc.text.length))
@@ -275,7 +277,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
         val target = absoluteChar.coerceIn(ch.start, maxOf(ch.start, ch.end - 1))
 
-        pageView.configure(settings, book?.title ?: "")
+        pageView.configure(settings)
         pageView.setChapter(bStart, bEnd, ch.title, target, lastPage)
         pageView.overallPercent = progressOf(target)
         updateHeader()
@@ -447,7 +449,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         if (next.fontSizeSp == settings.fontSizeSp) return
         settings = next
         settingsStore.save(settings)
-        pageView.configure(settings, book?.title ?: "")
+        pageView.configure(settings)
         updateHeader()
         toast("字号 ${settings.fontSizeSp.toInt()}")
     }
@@ -461,14 +463,14 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         settings = settings.copy(theme = t)
         settingsStore.save(settings)
         btnTheme.text = t.label
-        pageView.configure(settings, book?.title ?: "")
+        pageView.configure(settings)
     }
 
     private fun toggleNight() {
         settings = settingsStore.quickToggleNight(settings)
         settingsStore.save(settings)
         btnTheme.text = settings.theme.label
-        pageView.configure(settings, book?.title ?: "")
+        pageView.configure(settings)
         toast(if (settings.theme == ReaderTheme.NIGHT) "夜间模式" else "日间模式")
     }
 
@@ -583,7 +585,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             return
         }
         searchStatus.text = "搜索中\u2026"
-        lifecycleScope.launch {
+        searchJob?.cancel()
+        searchJob = lifecycleScope.launch {
             val hits = withContext(Dispatchers.IO) { searchAll(doc.text, q, 300) }
             if (searchOverlay.visibility != View.VISIBLE) return@launch
             searchResults = hits
@@ -982,7 +985,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         settings = s
         settingsStore.save(s)
         btnTheme.text = s.theme.label
-        pageView.configure(s, book?.title ?: "")
+        pageView.configure(s)
         updateHeader()
     }
 
@@ -1053,12 +1056,18 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             setColor(0xFF1B2129.toInt())
         })
         // ListView 自己接 A：焦点在列表上时，Dialog 那层的 OnKeyListener 收不到（被 View 树先处理）
+        // 首屏 selection 未必就绪，退回首可见项，A 键不至于完全无响应
+        fun ListView.pickedPosition(): Int {
+            val p = selectedItemPosition
+            if (p in items.indices) return p
+            return firstVisiblePosition.takeIf { it in items.indices } ?: -1
+        }
         list.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN &&
                 (keyCode == KeyEvent.KEYCODE_BUTTON_A || keyCode == KeyEvent.KEYCODE_DPAD_CENTER)
             ) {
-                val pos = list.selectedItemPosition
-                if (pos in items.indices) {
+                val pos = list.pickedPosition()
+                if (pos >= 0) {
                     onPick(pos)
                     dlg.dismiss()
                     true
@@ -1083,8 +1092,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                     when {
                         // hasFocus() 比 findFocus() 实例比对可靠：焦点可能落在列表的子树里
                         list.hasFocus() -> {
-                            val pos = list.selectedItemPosition
-                            if (pos in items.indices) {
+                            val pos = list.pickedPosition()
+                            if (pos >= 0) {
                                 onPick(pos)
                                 dlg.dismiss()
                                 true

@@ -91,7 +91,8 @@ class PageView @JvmOverloads constructor(
     ) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
     }
-    private val sizeCache = HashMap<String, Pair<Int, Int>>()
+    // 分页线程（imageMetrics 回调）与图片预解码线程（IO）都会读写，必须并发安全
+    private val sizeCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Int>>()
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
@@ -120,7 +121,7 @@ class PageView @JvmOverloads constructor(
 
     // ---------------- 配置 ----------------
 
-    fun configure(settings: ReaderSettings, @Suppress("UNUSED_PARAMETER") bookTitle: String) {
+    fun configure(settings: ReaderSettings) {
         val changed = this.settings != settings
         this.settings = settings
         applyPaints()
