@@ -170,6 +170,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
         pageView.listener = this
         pageView.scope = lifecycleScope
+        // 提前注入用户设置：loading 转圈期间 PageView 画的底色就是当前主题，
+        // 否则要等 loadBook 完成才 configure，非纸白主题会先闪一片默认纸白
+        pageView.configure(settings)
         bindMenu()
         setupSearchUi()
         refreshBattery(reschedule = true)

@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 根布局不设背景：底色由 onCreate 里的窗口背景（当前阅读主题色）透出，
+     避免首帧闪写死的深色 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#101317">
+    android:layout_height="match_parent">
 
     <com.kpa.reader.ui.PageView
         android:id="@+id/pageView"
