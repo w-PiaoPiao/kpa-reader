@@ -40,7 +40,7 @@
                 android:layout_height="match_parent"
                 android:gravity="center"
                 android:maxLines="1"
-                android:textColor="#5FFFFFFF"
+                android:textColor="@color/cover_placeholder"
                 android:textSize="30sp"
                 android:visibility="gone" />
 
@@ -51,8 +51,8 @@
                 android:layout_height="4dp"
                 android:layout_gravity="bottom"
                 android:max="1000"
-                android:progressBackgroundTint="#262B33"
-                android:progressTint="#7C9CFF" />
+                android:progressBackgroundTint="@color/line"
+                android:progressTint="@color/progress" />
         </FrameLayout>
 
         <TextView
@@ -65,7 +65,7 @@
             android:paddingHorizontal="6dp"
             android:paddingVertical="2dp"
             android:text="▶ 继续"
-            android:textColor="#221A04"
+            android:textColor="@color/on_accent"
             android:textSize="8sp"
             android:textStyle="bold"
             android:visibility="gone" />
@@ -80,7 +80,7 @@
             android:paddingHorizontal="6dp"
             android:paddingVertical="2dp"
             android:text="读完"
-            android:textColor="#FFD24A"
+            android:textColor="@color/accent_bright"
             android:textSize="8sp"
             android:textStyle="bold"
             android:visibility="gone" />

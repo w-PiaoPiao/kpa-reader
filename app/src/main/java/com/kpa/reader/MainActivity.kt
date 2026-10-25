@@ -1,6 +1,5 @@
 package com.kpa.reader
 
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -31,6 +30,7 @@ import com.kpa.reader.input.Gamepad
 import com.kpa.reader.input.Keymap
 import com.kpa.reader.ui.ReaderActivity
 import com.kpa.reader.ui.ShelfAdapter
+import com.kpa.reader.ui.showPadMessageDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -348,60 +348,23 @@ class MainActivity : AppCompatActivity() {
             else -> e.message?.takeIf { it.isNotBlank() }
                 ?: "解析失败（${e.javaClass.simpleName}）"
         }
-        showGamepadDialog(AlertDialog.Builder(this)
-            .setTitle("导入失败")
-            .setMessage(msg)
-            .setPositiveButton("知道了", null), focusPositive = true)
-    }
-
-    /**
-     * AlertDialog 是独立窗口，Activity 的 dispatchKeyEvent 收不到手柄按键。
-     * 照 ReaderActivity 列表弹窗的做法挂 OnKeyListener：A/确认键 = 点击焦点按钮，B = 关闭。
-     * AlertDialog 默认聚焦的是「删除」这类 destructive 按钮，A 键一下就误删 ——
-     * 所以 [focusPositive] 只给单按钮提示框用，双按钮确认框一律聚焦安全侧（取消）。
-     */
-    private fun showGamepadDialog(builder: AlertDialog.Builder, focusPositive: Boolean = false) {
-        val dlg = builder.create()
-        dlg.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                when (keyCode) {
-                    KeyEvent.KEYCODE_BUTTON_A,
-                    KeyEvent.KEYCODE_DPAD_CENTER,
-                    KeyEvent.KEYCODE_ENTER -> {
-                        val focused = dlg.window?.decorView?.findFocus()
-                        if (focused != null && focused !== dlg.window?.decorView) {
-                            focused.performClick()
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    KeyEvent.KEYCODE_BUTTON_B -> {
-                        dlg.dismiss()
-                        true
-                    }
-                    else -> false
-                }
-            } else {
-                false
-            }
-        }
-        dlg.show()
-        val target = if (focusPositive) AlertDialog.BUTTON_POSITIVE else AlertDialog.BUTTON_NEGATIVE
-        (dlg.getButton(target) ?: dlg.getButton(AlertDialog.BUTTON_POSITIVE))?.requestFocus()
+        showPadMessageDialog(this, "导入失败", msg, "知道了")
     }
 
     private fun confirmDelete(book: Book) {
-        showGamepadDialog(AlertDialog.Builder(this)
-            .setTitle("删除")
-            .setMessage("从书架移除《${book.title}》？\n（只删本地缓存，原文件不受影响）")
-            .setPositiveButton("删除") { _, _ ->
+        showPadMessageDialog(
+            this,
+            "删除",
+            "从书架移除《${book.title}》？\n（只删本地缓存，原文件不受影响）",
+            positiveText = "删除",
+            onPositive = {
                 store.remove(book.id)
                 BookImporter.removeCache(this, book.id)
                 toast("已移除")
                 refresh()
-            }
-            .setNegativeButton("取消", null))
+            },
+            negativeText = "取消"
+        )
     }
 
     private fun showHelp() {
@@ -416,10 +379,7 @@ class MainActivity : AppCompatActivity() {
             appendLine("【阅读中】")
             Gamepad.helpLines().forEach { (k, v) -> appendLine("· $k　→　$v") }
         }
-        showGamepadDialog(AlertDialog.Builder(this)
-            .setTitle("操作说明")
-            .setMessage(text)
-            .setPositiveButton("知道了", null), focusPositive = true)
+        showPadMessageDialog(this, "操作说明", text, "知道了")
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

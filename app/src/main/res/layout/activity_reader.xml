@@ -17,7 +17,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:indeterminateTint="#D9A441"
+        android:indeterminateTint="@color/accent"
         android:visibility="gone" />
 
     <LinearLayout
@@ -29,8 +29,8 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="46dp"
-            android:background="#141820"
+            android:layout_height="48dp"
+            android:background="@color/bg_panel"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="8dp">
@@ -45,7 +45,7 @@
                 android:focusableInTouchMode="true"
                 android:gravity="center"
                 android:text="返回"
-                android:textColor="#E8E4DA"
+                android:textColor="@color/text_primary"
                 android:textSize="12sp" />
 
             <LinearLayout
@@ -61,7 +61,7 @@
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="1"
-                    android:textColor="#E8E4DA"
+                    android:textColor="@color/text_primary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -70,7 +70,7 @@
                     android:layout_height="wrap_content"
                     android:ellipsize="end"
                     android:maxLines="1"
-                    android:textColor="#8A94A0"
+                    android:textColor="@color/text_tertiary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -79,7 +79,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
-                android:textColor="#D9A441"
+                android:textColor="@color/accent"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -88,12 +88,12 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:background="#66000000" />
+            android:background="@color/scrim_menu" />
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:background="#141820"
+            android:layout_height="48dp"
+            android:background="@color/bg_panel"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="6dp">
@@ -151,7 +151,7 @@
         android:id="@+id/searchOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FF141820"
+        android:background="@color/bg_panel"
         android:orientation="vertical"
         android:padding="12dp"
         android:visibility="gone">
@@ -161,27 +161,26 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:divider="#2A3038"
-            android:dividerHeight="1dp" />
+            android:listSelector="@color/accent_focus_bg" />
 
         <TextView
             android:id="@+id/searchStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingVertical="4dp"
-            android:textColor="#8A94A0"
+            android:textColor="@color/text_tertiary"
             android:textSize="11sp" />
 
         <EditText
             android:id="@+id/searchInput"
             android:layout_width="match_parent"
             android:layout_height="42dp"
-            android:background="#FF232B35"
+            android:background="@color/bg_input"
             android:hint="输入关键词，边打边搜"
             android:paddingHorizontal="12dp"
             android:singleLine="true"
-            android:textColor="#E8E4DA"
-            android:textColorHint="#6B7683"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_faint"
             android:textSize="14sp" />
     </LinearLayout>
 
@@ -196,7 +195,7 @@
         android:gravity="center"
         android:paddingHorizontal="16dp"
         android:paddingVertical="10dp"
-        android:textColor="#E8E4DA"
+        android:textColor="@color/text_primary"
         android:textSize="11.5sp"
         android:visibility="gone" />
 

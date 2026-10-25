@@ -8,7 +8,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#141519"
+    android:background="@color/bg_page"
     android:orientation="vertical">
 
     <LinearLayout
@@ -23,7 +23,7 @@
             android:layout_height="wrap_content"
             android:letterSpacing="0.06"
             android:text="书库"
-            android:textColor="#F2F3F5"
+            android:textColor="@color/text_primary"
             android:textSize="18sp"
             android:textStyle="bold" />
 
@@ -37,7 +37,7 @@
             android:letterSpacing="0.1"
             android:maxLines="1"
             android:text="LIBRARY · 0 本"
-            android:textColor="#9AA0AB"
+            android:textColor="@color/text_tertiary"
             android:textSize="10.5sp" />
 
         <TextView
@@ -48,7 +48,7 @@
             android:gravity="center"
             android:paddingHorizontal="8dp"
             android:text="排序·最近阅读"
-            android:textColor="#DCE3EC"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
         <TextView
@@ -60,7 +60,7 @@
             android:gravity="center"
             android:paddingHorizontal="10dp"
             android:text="按键"
-            android:textColor="#DCE3EC"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
         <TextView
@@ -72,7 +72,7 @@
             android:gravity="center"
             android:paddingHorizontal="12dp"
             android:text="+ 导入"
-            android:textColor="#1A1208"
+            android:textColor="@color/on_accent"
             android:textSize="11sp"
             android:textStyle="bold" />
 
@@ -81,7 +81,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
-            android:textColor="#C9CDD6"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
 
         <TextView
@@ -89,7 +89,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:textColor="#C9CDD6"
+            android:textColor="@color/text_secondary"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -117,7 +117,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="书架还空着"
-                android:textColor="#5E6975"
+                android:textColor="@color/text_faint"
                 android:textSize="15sp" />
 
             <TextView
@@ -125,7 +125,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="点右上角「导入」添加 TXT / EPUB / MOBI / AZW3"
-                android:textColor="#3E4753"
+                android:textColor="@color/text_faint"
                 android:textSize="11sp" />
         </LinearLayout>
 
@@ -133,7 +133,7 @@
             android:id="@+id/importOverlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="#D9141519"
+            android:background="@color/scrim_page"
             android:gravity="center"
             android:orientation="vertical"
             android:visibility="gone">
@@ -141,7 +141,7 @@
             <ProgressBar
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:indeterminateTint="#D9A441" />
+                android:indeterminateTint="@color/accent" />
 
             <TextView
                 android:id="@+id/tvImportState"
@@ -149,8 +149,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="正在解析…"
-                android:textColor="#C8D0DA"
-                android:textSize="12sp" />
+android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
         </LinearLayout>
     </FrameLayout>
 
@@ -179,7 +179,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="—"
-                android:textColor="#F2F3F5"
+                android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
@@ -188,7 +188,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
-                android:textColor="#9AA0AB"
+                android:textColor="@color/text_tertiary"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -199,7 +199,7 @@
             android:layout_marginTop="3dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#9AA0AB"
+            android:textColor="@color/text_tertiary"
             android:textSize="12sp" />
 
         <LinearLayout
@@ -216,8 +216,8 @@
                 android:layout_height="5dp"
                 android:layout_weight="1"
                 android:max="1000"
-                android:progressBackgroundTint="#2A2E36"
-                android:progressTint="#7C9CFF" />
+            android:progressBackgroundTint="@color/line"
+            android:progressTint="@color/progress" />
 
             <TextView
                 android:id="@+id/tvPanelPct"
@@ -226,7 +226,7 @@
                 android:layout_marginStart="12dp"
                 android:minWidth="44dp"
                 android:textAlignment="viewEnd"
-                android:textColor="#F2F3F5"
+                android:textColor="@color/text_primary"
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
@@ -235,7 +235,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
-                android:textColor="#9AA0AB"
+                android:textColor="@color/text_tertiary"
                 android:textSize="11.5sp" />
         </LinearLayout>
     </LinearLayout>
@@ -249,7 +249,7 @@
         android:letterSpacing="0.04"
         android:maxLines="1"
         android:text="十字键 选书　·　A 打开　·　X 删除　·　L1/R1 翻页　·　Y 说明"
-        android:textColor="#8D93A0"
+        android:textColor="@color/text_tertiary"
         android:textSize="10.5sp" />
 
 </LinearLayout>

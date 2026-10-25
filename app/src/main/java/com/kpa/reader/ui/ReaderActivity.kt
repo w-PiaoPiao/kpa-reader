@@ -1,6 +1,5 @@
 package com.kpa.reader.ui
 
-import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
@@ -566,7 +565,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 tv.minHeight = 0
                 tv.gravity = Gravity.CENTER_VERTICAL
                 tv.textSize = 12f
-                tv.setTextColor(0xFFE2E7EE.toInt())
+                tv.setTextColor(getColor(R.color.text_secondary))
                 return tv
             }
         }
@@ -658,14 +657,14 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 val head = "$title \u27E9 "
                 val ss = SpannableString(head + hit.preview)
                 ss.setSpan(
-                    ForegroundColorSpan(0xFFD9A441.toInt()),
+                    ForegroundColorSpan(getColor(R.color.accent)),
                     0, head.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                 )
                 val hl = head.length + hit.hitFrom
                 val hEnd = (hl + q.length).coerceAtMost(ss.length)
                 if (hl in 0 until hEnd) {
                     ss.setSpan(
-                        ForegroundColorSpan(0xFFE8623C.toInt()),
+                        ForegroundColorSpan(getColor(R.color.highlight)),
                         hl, hEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                     )
                 }
@@ -767,7 +766,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         fun title(parent: LinearLayout, t: String) {
             parent.addView(TextView(this).apply {
                 text = t
-                setTextColor(0xFFD9A441.toInt())
+                setTextColor(getColor(R.color.accent))
                 textSize = 12f
                 setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
             })
@@ -784,7 +783,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             }
             val tv = TextView(this).apply {
                 text = "$label $value$suffix"
-                setTextColor(0xFFE2E7EE.toInt())
+                setTextColor(getColor(R.color.text_secondary))
                 textSize = 12f
             }
             val sb = SeekBar(this).apply {
@@ -825,7 +824,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 true
             }
             sb.setOnFocusChangeListener { v, hasFocus ->
-                v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+                v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
             }
             if (firstFocusable == null) firstFocusable = sb
             row.addView(tv, LinearLayout.LayoutParams((96 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -837,7 +836,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             var state = initial
             val tv = TextView(this).apply {
                 text = "$label：" + if (state) "开" else "关"
-                setTextColor(0xFFE2E7EE.toInt())
+                setTextColor(getColor(R.color.text_secondary))
                 textSize = 12f
                 setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt())
                 isClickable = true
@@ -849,7 +848,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                     onChange(state)
                 }
                 setOnFocusChangeListener { v, hasFocus ->
-                    v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+                    v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
                 }
                 // 手柄 A 在系统里不是 ENTER，Dialog 里也没人帮忙转成点击，得自己处理
                 setOnKeyListener { _, keyCode, event ->
@@ -898,7 +897,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         }
         val jumpTv = TextView(this).apply {
             text = "${(pageView.overallPercent * 100).toInt()}%"
-            setTextColor(0xFFE2E7EE.toInt())
+            setTextColor(getColor(R.color.text_secondary))
             textSize = 12f
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -908,7 +907,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             isFocusable = true
             isFocusableInTouchMode = true
             setOnFocusChangeListener { v, hasFocus ->
-                v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+                v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
             }
         }
         jumpSb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -938,12 +937,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         fun keyRow(action: Gamepad.Action) {
             val tv = TextView(this).apply {
                 textSize = 12f
-                setTextColor(0xFFE2E7EE.toInt())
+                setTextColor(getColor(R.color.text_secondary))
                 setPadding((8 * d).toInt(), (7 * d).toInt(), (8 * d).toInt(), (7 * d).toInt())
                 isFocusable = true
                 isFocusableInTouchMode = true
                 setOnFocusChangeListener { v, hasFocus ->
-                    v.setBackgroundColor(if (hasFocus) 0x33D9A441 else 0x00000000)
+                    v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
                 }
                 setOnClickListener {
                     capturing = action
@@ -1002,7 +1001,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 else -> false
             }
         }
-        barButton("跳到该位置") {
+        GamepadDialog.barButton(this, "跳到该位置") {
             val doc = document
             if (doc != null && doc.text.isNotEmpty()) {
                 val off = (doc.text.length.toLong() * jumpSb.progress / 1000).toInt()
@@ -1015,13 +1014,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             val bar = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END
-                setBackgroundColor(0xFF1B2129.toInt())
+                setBackgroundColor(getColor(R.color.bg_panel))
                 addView(jumpBtn)
-                addView(barButton("关闭") { dlg.dismiss() })
+                addView(GamepadDialog.barButton(this@ReaderActivity, "关闭") { dlg.dismiss() })
             }
             val container = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(0xFF1B2129.toInt())
+                setBackgroundColor(getColor(R.color.bg_panel))
             }
             val scroller = ScrollView(this).apply {
                 isFillViewport = true
@@ -1035,10 +1034,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             dlg.setContentView(container)
             dlg.window?.setLayout((dm.widthPixels * 0.86f).toInt(), (dm.heightPixels * 0.92f).toInt())
             dlg.setOnShowListener { firstFocusable?.requestFocus() }
-            dlg.window?.setBackgroundDrawable(android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 12 * d
-                setColor(0xFF1B2129.toInt())
-            })
+            dlg.window?.setBackgroundDrawable(GamepadDialog.windowBackground(this))
             dlg.show()
         }
     }
@@ -1066,12 +1062,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF1B2129.toInt())
+            setBackgroundColor(getColor(R.color.bg_panel))
             setPadding(pad, pad, pad, 0)
         }
         root.addView(TextView(this).apply {
             text = title
-            setTextColor(0xFFE8E4DA.toInt())
+            setTextColor(getColor(R.color.text_primary))
             textSize = 15f
             setPadding(0, 0, 0, (pad * 0.6f).toInt())
         })
@@ -1088,15 +1084,17 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 tv.minHeight = 0
                 tv.gravity = Gravity.CENTER_VERTICAL
                 tv.textSize = 13f
-                tv.setTextColor(0xFFE2E7EE.toInt())
+                tv.setTextColor(getColor(R.color.text_secondary))
                 return tv
             }
         }
         val list = ListView(this).apply {
             adapter = listAdapter
-            divider = ColorDrawable(0xFF2A3038.toInt())
+            divider = ColorDrawable(getColor(R.color.line))
             dividerHeight = 1
             isFocusable = true
+            // 手柄选中高亮与行控件焦点同档：25% 金底
+            selector = ColorDrawable(getColor(R.color.accent_focus_bg))
         }
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -1106,17 +1104,14 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         }
         val dlg = Dialog(this)
         if (neutralText != null) {
-            barButton(neutralText) { onNeutral?.invoke(dlg) }
+            GamepadDialog.barButton(this, neutralText) { onNeutral?.invoke(dlg) }
         }
-        bar.addView(barButton("关闭") { dlg.dismiss() })
+        bar.addView(GamepadDialog.barButton(this, "关闭") { dlg.dismiss() })
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (48 * dm.density).toInt()))
 
         dlg.setContentView(root)
         dlg.window?.setLayout((dm.widthPixels * 0.66f).toInt(), (dm.heightPixels * 0.92f).toInt())
-        dlg.window?.setBackgroundDrawable(android.graphics.drawable.GradientDrawable().apply {
-            cornerRadius = 12 * dm.density
-            setColor(0xFF1B2129.toInt())
-        })
+        dlg.window?.setBackgroundDrawable(GamepadDialog.windowBackground(this))
         // ListView 自己接 A：焦点在列表上时，Dialog 那层的 OnKeyListener 收不到（被 View 树先处理）
         // 首屏 selection 未必就绪，退回首可见项，A 键不至于完全无响应
         fun ListView.pickedPosition(): Int {
@@ -1184,23 +1179,6 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             list.setSelection((initialSelection - 2).coerceAtLeast(0))
         }
     }
-
-    private fun barButton(text: String, onClick: () -> Unit): TextView =
-        TextView(this).apply {
-            this.text = text
-            setTextColor(0xFFDCE3EC.toInt())
-            textSize = 13f
-            gravity = Gravity.CENTER
-            val d = resources.displayMetrics.density
-            setPadding((18 * d).toInt(), 0, (18 * d).toInt(), 0)
-            isClickable = true
-            isFocusable = true
-            isFocusableInTouchMode = true
-            setOnClickListener { onClick() }
-            setOnFocusChangeListener { v, hasFocus ->
-                v.setBackgroundColor(if (hasFocus) 0x59D9A441 else 0x00000000)
-            }
-        }
 
     // ---------------- 按键 ----------------
 
@@ -1308,7 +1286,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
      * 后退的双击验证：第一下只提示，[EXIT_CONFIRM_MS] 内再按一次才退回书架。
      * 单手阅读时 B 很容易误触，直接退出会丢掉当前阅读节奏。
      */
-    private fun requestExit(hint: String = "再按一次 B 返回书架") {
+    private fun requestExit(hint: String = "再按一次「B」返回书架") {
         val now = SystemClock.uptimeMillis()
         if (now - lastBackPressAt <= EXIT_CONFIRM_MS) {
             lastBackPressAt = 0L

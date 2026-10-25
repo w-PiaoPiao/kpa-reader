@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  全项目唯一色板。写任何 UI 颜色先来这里找档位，找不到再考虑加档：
+  - 深色底 3 档：bg_page（页面）/ bg_panel（面板·弹窗·菜单）/ bg_input（输入框·嵌入面）
+  - 文字 4 档：text_primary / text_secondary / text_tertiary / text_faint
+  - 金色 2 档：accent / accent_bright
+  - 焦点态：accent_focus_bg（25% 金底，行控件）/ stroke_focused（白描边，卡片与金底按钮）
+  阅读正文主题色（ReaderTheme）和书架封面占位彩色组是内容色，不进这张表。
+-->
+<resources>
+    <!-- 深色底三档 -->
+    <color name="bg_page">#FF141519</color>
+    <color name="bg_panel">#FF1B2129</color>
+    <color name="bg_input">#FF232B35</color>
+
+    <!-- 蒙层：浮层与角标用 80% 面板底，全屏阻断用 80% 页面底 -->
+    <color name="scrim_panel">#CC1B2129</color>
+    <color name="scrim_page">#CC141519</color>
+    <!-- 阅读菜单展开时压正文的纯黑遮罩 -->
+    <color name="scrim_menu">#66000000</color>
+
+    <!-- 中性细线：分隔线 / 面板描边 / 进度 track 通用 -->
+    <color name="line">#FF2A2E36</color>
+
+    <!-- 文字四档 -->
+    <color name="text_primary">#FFF2F3F5</color>
+    <color name="text_secondary">#FFDCE3EC</color>
+    <color name="text_tertiary">#FF9AA0AB</color>
+    <color name="text_faint">#FF5E6975</color>
+
+    <!-- 金色两档 -->
+    <color name="accent">#FFD9A441</color>
+    <color name="accent_bright">#FFE6BC5C</color>
+
+    <!-- 焦点态：行控件 25% 金底；卡片与金底按钮用白描边 -->
+    <color name="accent_focus_bg">#40D9A441</color>
+    <color name="stroke_focused">#FFF2F3F5</color>
+
+    <!-- 金底按钮上的深字 -->
+    <color name="on_accent">#FF1A1208</color>
+
+    <!-- 进度与搜索命中高亮 -->
+    <color name="progress">#FF7C9CFF</color>
+    <color name="highlight">#FFE8623C</color>
+
+    <!-- 封面占位首字：30% 白 -->
+    <color name="cover_placeholder">#5FFFFFFF</color>
+</resources>
