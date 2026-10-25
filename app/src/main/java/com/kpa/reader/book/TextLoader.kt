@@ -74,14 +74,52 @@ object TextLoader {
             // 不是合法 UTF-8，往下走
         }
 
-        // 3. GB18030 / GBK
-        val gb = runCatching { Charset.forName("GB18030") }.getOrNull()
-        if (gb != null) {
-            return Loaded(normalize(String(bytes, gb)), "GB18030")
+        // 3. 无 BOM 的 UTF-16：含足够 ASCII 时半个字节是 0x00，统计奇偶偏移的
+        //    0x00 占比即可判别方向。GBK 合法流几乎不含 0x00 字节，不会误触；
+        //    纯 CJK 的无 BOM UTF-16 没有这个特征，只能漏判（无解，罕见）。
+        if (bytes.size >= 64) {
+            val pairs = bytes.size / 2
+            var evenZero = 0
+            var oddZero = 0
+            for (k in 0 until pairs) {
+                if (bytes[k * 2] == 0.toByte()) evenZero++
+                if (bytes[k * 2 + 1] == 0.toByte()) oddZero++
+            }
+            val cs = when {
+                oddZero * 10 > pairs * 3 -> Charsets.UTF_16LE
+                evenZero * 10 > pairs * 3 -> Charsets.UTF_16BE
+                else -> null
+            }
+            if (cs != null) return Loaded(normalize(String(bytes, cs)), cs.name())
         }
 
-        // 4. 实在不行，替换解码
+        // 4. GB18030 / GBK：合法中文文件不会解出替换符；解出一堆 U+FFFD
+        //    说明字节根本不是中文编码（典型：西文老编码），别硬吃
+        val gb = runCatching { Charset.forName("GB18030") }.getOrNull()
+        if (gb != null) {
+            val s = String(bytes, gb)
+            if (badRatio(s) < 0.01f) return Loaded(normalize(s), "GB18030")
+        }
+
+        // 5. 西文老编码（windows-1252 一系）。CP1252 全字节空间有映射，几乎不产生
+        //    替换符；但 NUL 除外 —— UTF-16 字节流硬解 1252 会大量 NUL，用它在门口拦掉
+        runCatching { Charset.forName("windows-1252") }.getOrNull()?.let { cs ->
+            val s = String(bytes, cs)
+            if (badRatio(s) < 0.01f && s.count { it == '\u0000' } <= s.length / 100) {
+                return Loaded(normalize(s), "windows-1252")
+            }
+        }
+
+        // 6. 实在不行，替换解码
         return Loaded(normalize(String(bytes, Charsets.UTF_8)), "UTF-8(替换)")
+    }
+
+    /** 替换符占比：合法文本应接近 0，编错码时会冒出一串 */
+    private fun badRatio(s: String): Float {
+        if (s.isEmpty()) return 0f
+        var bad = 0
+        for (c in s) if (c == '\uFFFD') bad++
+        return bad.toFloat() / s.length
     }
 
     /** 统一换行、清掉控制符与零宽字符、压缩多余空行 */
