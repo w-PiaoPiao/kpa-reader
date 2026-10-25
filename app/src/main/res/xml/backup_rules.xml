@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 及以下的云备份规则（fullBackupContent 渠道）。
+     书库缓存（books/ 全文与图片 + library.json）动辄几十上百 MB，
+     远超 auto-backup 限额，备份一半失败恢复出来的是「书架空壳 + 文件残缺」的
+     不一致状态 —— 不如整个 filesDir 排除，设备迁移后重新导入。 -->
+<full-backup-content>
+    <exclude domain="file" path="." />
+</full-backup-content>
