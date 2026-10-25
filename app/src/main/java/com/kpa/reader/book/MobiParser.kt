@@ -35,6 +35,9 @@ object MobiParser {
     private const val COMPRESSION_PALMDOC = 2
     private const val COMPRESSION_HUFF = 17480
 
+    /** 单本上限。MOBI 带图网文常见 30-50MB，80MB 再往上掌机内存就顶不住了 */
+    private const val MAX_BYTES = 80L * 1024 * 1024
+
     // record 0 内的绝对偏移（沿用 mobiunpack / libmobi 的字段布局）
     private const val OFF_COMPRESSION = 0
     private const val OFF_TEXT_LENGTH = 4
@@ -53,8 +56,22 @@ object MobiParser {
     private const val OFF_EXTRA_FLAGS = 0xF2
 
     fun parse(context: Context, uri: Uri): Parsed {
-        val data = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw IOException("无法读取文件")
+        val data = context.contentResolver.openInputStream(uri)?.use { input ->
+            // 流式限流而不是 readBytes()：MOBI 常带几十 MB 图片，不限会直接把掌机堆打爆
+            val out = ByteArrayOutputStream(1 shl 16)
+            val buf = ByteArray(1 shl 16)
+            var total = 0
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                total += n
+                if (total > MAX_BYTES) {
+                    throw IOException("这本书超过 ${MAX_BYTES / 1024 / 1024}MB，掌机内存吃不下，换个小一点的版本试试")
+                }
+                out.write(buf, 0, n)
+            }
+            out.toByteArray()
+        } ?: throw IOException("无法读取文件")
         if (data.size < 100) throw IOException("文件太小，不是有效的 MOBI")
 
         val records = splitPdbRecords(data)
@@ -127,7 +144,7 @@ object MobiParser {
         }
 
         val bodyBytes = ByteArrayOutputStream(maxOf(textLength, 4096))
-        val out = ByteArrayOutputStream(8192)
+        val out = PalmDocOutput(8192)
         for (i in textStart..textEnd) {
             if (i >= records.size) break
             val raw = records[i]
@@ -225,7 +242,28 @@ object MobiParser {
 
     // ---------------- 解压 ----------------
 
-    private fun decompressPalmDoc(src: ByteArray, out: ByteArrayOutputStream) {
+    /**
+     * LZ77 回引直接从内部 buf 边写边读：
+     * 1. 原先每个回引都 out.toByteArray() 全量拷贝一次，一条 4096B 记录上百个回引，
+     *    GC 压力全在这；
+     * 2. 快照数组按旧边界 break，不支持**重叠回引**（PalmDOC 允许 dist < len，
+     *    "哈哈哈哈"这类重复 run 就靠它展开），会静默丢字。边写边读的滑动窗口语义才对。
+     */
+    /** internal 仅供单元测试 */
+    internal class PalmDocOutput(initial: Int) : ByteArrayOutputStream(initial) {
+        fun copyBack(dist: Int, len: Int) {
+            var p = count - dist
+            if (p < 0) return
+            for (k in 0 until len) {
+                if (p >= count) break
+                write(buf[p].toInt())
+                p++
+            }
+        }
+    }
+
+    /** internal 仅供单元测试 */
+    internal fun decompressPalmDoc(src: ByteArray, out: PalmDocOutput) {
         var i = 0
         val n = src.size
         while (i < n) {
@@ -244,13 +282,7 @@ object MobiParser {
                     val len = (v and 0x07) + 3
                     i += 2
                     if (dist == 0) continue
-                    val buf = out.toByteArray()
-                    var p = buf.size - dist
-                    for (k in 0 until len) {
-                        val idx = p + k
-                        if (idx < 0 || idx >= buf.size) break
-                        out.write(buf[idx].toInt())
-                    }
+                    out.copyBack(dist, len)
                 }
                 else -> {
                     out.write(' '.code)
@@ -347,7 +379,8 @@ object MobiParser {
      * 更可靠的判据是：PalmDOC 记录总是解满 recordSize(4096)，超出多少就该剥多少；
      * 只有最后一条（本身不足 4096）才用 bit0 给出的多字节重叠长度兜底。
      */
-    private fun stripTrailing(data: ByteArray, recordSize: Int, flags: Int): ByteArray {
+    /** internal 仅供单元测试 */
+    internal fun stripTrailing(data: ByteArray, recordSize: Int, flags: Int): ByteArray {
         if (data.isEmpty()) return data
         val strip = when {
             data.size > recordSize -> data.size - recordSize
@@ -423,10 +456,16 @@ object MobiParser {
             chapters.add(Chapter(title, chStart, sb.length, blockStartIdx, blocks.size))
         }
 
-        // 没有分页标记时按字数切
+        // 没有分页标记时按字数切。块区间必须在这里补上（与 BookImporter 的 TXT 分支对称），
+        // 否则 Chapter.blockStart=-1，阅读端每次换章都得按字符偏移反推
         if (chapters.size <= 1 && sb.length > 20000) {
             val text = sb.toString()
-            val chunked = ChapterSplitter.split(text)
+            val chunked = ChapterSplitter.split(text).map { ch ->
+                val bs = blocks.indexOfLast { it.start <= ch.start }.coerceAtLeast(0)
+                var be = blocks.indexOfLast { it.start < ch.end } + 1
+                if (be <= bs) be = (bs + 1).coerceAtMost(blocks.size)
+                ch.copy(blockStart = bs, blockEnd = be)
+            }
             return Triple(blocks, chunked, text)
         }
         if (chapters.isEmpty()) {
@@ -471,12 +510,14 @@ object MobiParser {
         }
     }
 
-    private fun be16(b: ByteArray, o: Int): Int {
+    /** internal 仅供单元测试 */
+    internal fun be16(b: ByteArray, o: Int): Int {
         if (o + 1 >= b.size) return 0
         return ((b[o].toInt() and 0xFF) shl 8) or (b[o + 1].toInt() and 0xFF)
     }
 
-    private fun be32(b: ByteArray, o: Int): Int {
+    /** internal 仅供单元测试 */
+    internal fun be32(b: ByteArray, o: Int): Int {
         if (o + 3 >= b.size) return 0
         return ((b[o].toInt() and 0xFF) shl 24) or
             ((b[o + 1].toInt() and 0xFF) shl 16) or
