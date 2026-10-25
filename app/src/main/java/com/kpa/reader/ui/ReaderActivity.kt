@@ -46,6 +46,7 @@ import com.kpa.reader.data.Chapter
 import com.kpa.reader.data.ReaderSettings
 import com.kpa.reader.data.ReaderTheme
 import com.kpa.reader.data.SettingsStore
+import com.kpa.reader.doc.Block
 import com.kpa.reader.doc.Document
 import com.kpa.reader.input.Gamepad
 import com.kpa.reader.input.Keymap
@@ -53,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -69,6 +71,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
         /** 后退双击验证的时间窗：2 秒内再按一次才退回书架 */
         private const val EXIT_CONFIRM_MS = 2000L
+
+        /** 预览文本压空白用：searchAll 每条命中都要跑，不能在循环里反复编译 */
+        private val WS_REGEX = Regex("\\s+")
 
         fun intentOf(context: Context, bookId: String, searchQuery: String? = null): Intent {
             val i = Intent(context, ReaderActivity::class.java).putExtra(EXTRA_ID, bookId)
@@ -102,6 +107,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     private var lastBackPressAt = 0L
     private var lastClearBookmarksAt = 0L
     private var savedOffset = -1
+    /** 与 [savedOffset] 配套：最后落盘时的全书百分比，用于落盘频率阈值判断 */
+    private var savedPct = -1f
 
     /** 页脚电量；-1 未知。阅读页屏幕常亮又没有系统状态栏，电量只有这里能看 */
     private var batteryPct = -1
@@ -124,6 +131,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     }
 
     private val saveRunnable = Runnable { saveProgressNow() }
+    /** loadBook 在 IO 线程产出的全部结果（文本、块、图片目录、章节） */
+    private class LoadedBook(
+        val text: String,
+        val blocks: List<Block>,
+        val imgDir: File,
+        val chapters: List<Chapter>
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -226,13 +240,15 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 } else {
                     Document.blocksFromPlainText(text)
                 }
-                Triple(text, blocks, File(dir, "$id.img"))
+                // 旧书库可能没存章节记录：全书扫描 77 万字要上百毫秒，一并留在 IO 线程
+                val chapters = if (b.chapters.isNotEmpty()) b.chapters else ChapterSplitter.split(text)
+                LoadedBook(text, blocks, File(dir, "$id.img"), chapters)
             }
 
-            val doc = Document(loaded.first, loaded.second)
+            val doc = Document(loaded.text, loaded.blocks)
             document = doc
-            imageDir = loaded.third
-            chapters = if (b.chapters.isNotEmpty()) b.chapters else ChapterSplitter.split(doc.text)
+            imageDir = loaded.imgDir
+            chapters = loaded.chapters
 
             pageView.setDocument(doc, imageDir)
             pageView.configure(settings)
@@ -299,10 +315,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
     private fun updateHeader() {
         val b = book ?: return
-        tvBookTitle.text = b.title
+        // 每次翻页都会走到：值没变就别 setText，省一轮无谓的 requestLayout
+        if (tvBookTitle.text != b.title) tvBookTitle.text = b.title
         val ch = chapters.getOrNull(chapterIndex)
-        tvChapterTitle.text = "${chapterIndex + 1}/${chapters.size} · ${ch?.title ?: ""}"
-        tvPercent.text = "${(pageView.overallPercent * 100).toInt()}%"
+        val chTitle = "${chapterIndex + 1}/${chapters.size} · ${ch?.title ?: ""}"
+        if (tvChapterTitle.text != chTitle) tvChapterTitle.text = chTitle
+        val pct = "${(pageView.overallPercent * 100).toInt()}%"
+        if (tvPercent.text != pct) tvPercent.text = pct
     }
 
     // ---------------- 进度 ----------------
@@ -312,14 +331,25 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         handler.postDelayed(saveRunnable, 700)
     }
 
-    private fun saveProgressNow() {
+    /**
+     * 持续阅读时避免高频全量 JSON 落盘：进度变化不足 0.1% 且不足 2000 字先不写
+     * （书多时一次 persist 是几百 KB 的序列化 + 写盘，费电也磨闪存）。
+     * [force] 给 onPause 兜底用，退出前必落；接近读完时放开阈值，别错过 finished 标记。
+     * 中途被杀最多丢 0.1% 书长的位置，约半页。
+     */
+    private fun saveProgressNow(force: Boolean = false) {
         val b = book ?: return
         val doc = document ?: return
         if (doc.text.isEmpty() || chapters.isEmpty()) return
         val off = pageView.currentCharOffset().coerceIn(0, doc.text.length)
         if (off == savedOffset) return
+        val pct = off.toFloat() / doc.text.length
+        if (!force && abs(pct - savedPct) < 0.001f &&
+            abs(off - savedOffset) < 2000 && pct < 0.995f
+        ) return
         savedOffset = off
-        store.updateProgress(b.id, off, off.toFloat() / doc.text.length)
+        savedPct = pct
+        store.updateProgress(b.id, off, pct)
         tvPercent.text = "${(pageView.overallPercent * 100).toInt()}%"
     }
 
@@ -328,7 +358,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         handler.removeCallbacks(batteryTick)
         handler.removeCallbacks(hideFirstHint)
         handler.removeCallbacks(fontToastRun)
-        saveProgressNow()
+        saveProgressNow(force = true)
         // 书库是异步写盘的，退出前等它落地，避免刚翻完页就切后台丢进度
         store.flush()
         super.onPause()
@@ -659,8 +689,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             val chIdx = ChapterSplitter.chapterIndexAt(chapters, idx)
             val s = (idx - 18).coerceAtLeast(0)
             val e = (idx + q.length + 26).coerceAtMost(text.length)
-            val preview = text.substring(s, e).replace('\n', ' ').replace(Regex("\\s+"), " ")
-            val lead = text.substring(s, idx).replace('\n', ' ').replace(Regex("\\s+"), " ").length
+            val preview = text.substring(s, e).replace('\n', ' ').replace(WS_REGEX, " ")
+            val lead = text.substring(s, idx).replace('\n', ' ').replace(WS_REGEX, " ").length
             out.add(Hit(idx, chIdx, preview, lead))
             from = idx + q.length
         }

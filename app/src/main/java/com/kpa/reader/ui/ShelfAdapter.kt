@@ -8,6 +8,7 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.kpa.reader.R
 import com.kpa.reader.data.Book
@@ -37,9 +38,21 @@ class ShelfAdapter(
     )
 
     fun submit(list: List<Book>, continuePosition: Int = -1) {
+        // DiffUtil 精确刷新：从阅读页返回书架时只有进度/时间戳变了的卡重绑，
+        // 封面和焦点动画状态不再整排重来
+        val old = items
+        val oldContinue = continuePos
+        val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize() = old.size
+            override fun getNewListSize() = list.size
+            override fun areItemsTheSame(oi: Int, ni: Int) = old[oi].id == list[ni].id
+            // 「继续」角标不在 Book 字段里，位置变化也要算内容变化
+            override fun areContentsTheSame(oi: Int, ni: Int) =
+                old[oi] == list[ni] && (oi == oldContinue) == (ni == continuePosition)
+        })
         items = list
         continuePos = continuePosition
-        notifyDataSetChanged()
+        diff.dispatchUpdatesTo(this)
     }
 
     fun itemAt(position: Int): Book? = items.getOrNull(position)

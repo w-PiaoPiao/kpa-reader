@@ -32,6 +32,12 @@ object HtmlBlockParser {
 
     private val ENTITY = Regex("&(?:#(\\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]{2,10}));")
 
+    /** clean() 每个文本块跑一次，一本几千块的书不能每次都重新编译 */
+    private val COLLAPSE_WS = Regex("[\\s\\u200B\\uFEFF]+")
+
+    /** attr() 按属性名缓存编译结果（key 只有 src/href/xlink:href 三种） */
+    private val ATTR_RE = java.util.concurrent.ConcurrentHashMap<String, Regex>()
+
     private val NAMED = mapOf(
         "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'",
         "nbsp" to " ", "ensp" to " ", "emsp" to " ", "thinsp" to " ",
@@ -204,7 +210,9 @@ object HtmlBlockParser {
     }
 
     private fun attr(attrs: String, key: String): String? {
-        val re = Regex("(?i)$key\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))")
+        val re = ATTR_RE.getOrPut(key) {
+            Regex("(?i)$key\\s*=\\s*(\"([^\"]*)\"|'([^']*)'|([^\\s>]+))")
+        }
         val m = re.find(attrs) ?: return null
         return m.groupValues[2].ifEmpty { m.groupValues[3].ifEmpty { m.groupValues[4] } }
     }
@@ -214,7 +222,7 @@ object HtmlBlockParser {
         val decoded = decodeEntities(raw)
         return decoded
             .replace('\u00A0', ' ')
-            .replace(Regex("[\\s\\u200B\\uFEFF]+"), " ")
+            .replace(COLLAPSE_WS, " ")
             .trim()
     }
 

@@ -87,6 +87,13 @@ class PageView @JvmOverloads constructor(
     private var renderedText: List<Rendered> = emptyList()
     private var renderedImages: List<LayoutEngine.Item.Img> = emptyList()
 
+    /**
+     * 翻过的页渲染缓存（pageIndex → 渲染结果）：同一章内来回翻页、长按连翻
+     * 不再重复构建 StaticLayout（那是按键路径上最大的一笔主线程开销）。
+     * 缓存与 pages 同代：pages 换代（换章/重排/换设置）时清空。
+     */
+    private val renderCache = HashMap<Int, Pair<List<Rendered>, List<LayoutEngine.Item.Img>>>()
+
     private val bitmapCache = object : LruCache<String, Bitmap>(
         (Runtime.getRuntime().maxMemory() / 1024 / 6).toInt().coerceIn(4096, 65536)
     ) {
@@ -123,6 +130,15 @@ class PageView @JvmOverloads constructor(
 
     /** 页脚电量百分比；-1 表示未知不画（沉浸阅读没有系统状态栏，电量只有这里能看到） */
     var batteryPct = -1
+
+    // 页眉页脚的文本/宽度缓存：翻页动画期间每帧都跑 onDraw，
+    // ellipsize 的 measureText 循环和百分比测宽不能留在帧路径上
+    private var chromeChapterKey = ""
+    private var chromeChapterW = -1f
+    private var chromeChapterTs = -1f
+    private var chromeChapterText = ""
+    private var chromePctText = ""
+    private var chromePctW = -1f
 
     // ---------------- 配置 ----------------
 
@@ -181,6 +197,7 @@ class PageView @JvmOverloads constructor(
         pageIndex = 0
         renderedText = emptyList()
         renderedImages = emptyList()
+        renderCache.clear()
         // 跨章时残影可能还在滑，cancel 掉免得它在换章后空转几帧
         ghostAnim?.cancel()
         ghost?.recycle(); ghost = null; ghostAlpha = 1f; ghostX = 0f
@@ -215,6 +232,7 @@ class PageView @JvmOverloads constructor(
         val blocks = d.blocks
         if (blocks.isEmpty() || chapterEnd <= chapterStart) {
             pages = emptyList(); renderedText = emptyList(); renderedImages = emptyList()
+            renderCache.clear()
             renderPageBitmap()
             invalidate(); return
         }
@@ -243,6 +261,7 @@ class PageView @JvmOverloads constructor(
             pages = e.paginateRange(blocks, startBlock, startChar, chapterEnd)
             pageIndex = if (toLastPage) (pages.size - 1).coerceAtLeast(0) else 0
             pendingChar = -1
+            renderCache.clear()
             buildPage()
             invalidate()
             listener?.onPageChanged(pageIndex, pages.size)
@@ -252,10 +271,13 @@ class PageView @JvmOverloads constructor(
         listener?.onLayoutState(true)
         layoutJob = sc.launch {
             val result = withContext(Dispatchers.Default) {
-                e.paginateRange(blocks, startBlock, startChar, chapterEnd)
+                val job = coroutineContext[Job]
+                e.paginateRange(blocks, startBlock, startChar, chapterEnd) { job?.isActive != false }
             }
             pages = result
             pageIndex = if (toLastPage) (result.size - 1).coerceAtLeast(0) else 0
+            pendingChar = -1
+            renderCache.clear()
             pendingChar = -1
             buildPage()
             invalidate()
@@ -274,7 +296,7 @@ class PageView @JvmOverloads constructor(
         if (pages.isEmpty()) return false
         if (pageIndex + 1 >= pages.size) return listener?.onBoundary(true) == true
         if (animated && ghostAnim?.isRunning != true) {
-            captureGhost()
+            handoffGhost()
             pageIndex++
             buildPage()
             startFlip(forward = true)
@@ -283,6 +305,8 @@ class PageView @JvmOverloads constructor(
             // 翻页节奏反复重启，残影像在原地抖；且跑着的残影内容已对不上新页
             ghostAnim?.cancel()
             ghostAlpha = 0f
+            ghost?.recycle()
+            ghost = null
             pageIndex++
             buildPage()
             invalidate()
@@ -295,13 +319,15 @@ class PageView @JvmOverloads constructor(
         if (pages.isEmpty()) return false
         if (pageIndex - 1 < 0) return listener?.onBoundary(false) == true
         if (animated && ghostAnim?.isRunning != true) {
-            captureGhost()
+            handoffGhost()
             pageIndex--
             buildPage()
             startFlip(forward = false)
         } else {
             ghostAnim?.cancel()
             ghostAlpha = 0f
+            ghost?.recycle()
+            ghost = null
             pageIndex--
             buildPage()
             invalidate()
@@ -326,6 +352,15 @@ class PageView @JvmOverloads constructor(
     private fun buildPage() {
         val d = doc ?: return
         val e = engine ?: return
+        // 翻回刚看过的页直接复用渲染结果，省掉整页 StaticLayout 重建
+        val cached = renderCache[pageIndex]
+        if (cached != null) {
+            renderedText = cached.first
+            renderedImages = cached.second
+            renderPageBitmap()
+            preloadImages(cached.second)
+            return
+        }
         val page = pages.getOrNull(pageIndex) ?: run {
             renderedText = emptyList(); renderedImages = emptyList()
             renderPageBitmap()
@@ -347,6 +382,9 @@ class PageView @JvmOverloads constructor(
         }
         renderedText = texts
         renderedImages = imgs
+        // 简单上限：一页缓存约几 KB 行数组，几十页足够覆盖回翻窗口，超了整体让位
+        if (renderCache.size >= 64) renderCache.clear()
+        renderCache[pageIndex] = texts to imgs
         renderPageBitmap()
         preloadImages(imgs)
     }
@@ -432,14 +470,15 @@ class PageView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(settings.theme.bg)
         val padH = (settings.padHdp * density).roundToInt()
 
-        // 正文一张位图上去（内部已裁剪/偏移好），动画帧从这里受益
-        pageBitmap?.let { bmp ->
-            if (bmp.width == width && bmp.height == height) {
-                canvas.drawBitmap(bmp, 0f, 0f, null)
-            }
+        // 正文一张不透明位图直接全屏覆盖（内部已裁剪/偏移好），动画帧从这里受益；
+        // 没有位图（排版中/空页）才画底色 —— 两者都画等于每帧多一次全屏填充
+        val bmp = pageBitmap
+        if (bmp != null && !bmp.isRecycled && bmp.width == width && bmp.height == height) {
+            canvas.drawBitmap(bmp, 0f, 0f, null)
+        } else {
+            canvas.drawColor(settings.theme.bg)
         }
         drawChrome(canvas, padH)
 
@@ -459,17 +498,18 @@ class PageView @JvmOverloads constructor(
         val maxW = (width - padH * 2).toFloat()
         val headerBase = (settings.padVdp * density) + chromePaint.textSize
         if (chapterLabel.isNotEmpty()) {
-            canvas.drawText(ellipsize(chapterLabel, maxW), padH.toFloat(), headerBase, chromePaint)
+            canvas.drawText(ellipsizeCached(chapterLabel, maxW), padH.toFloat(), headerBase, chromePaint)
         }
         val footerY = height - (settings.padVdp * density) - chromePaint.textSize * 0.25f
         val pageTxt = "${pageIndex + 1} / ${pages.size}"
         canvas.drawText(pageTxt, padH.toFloat(), footerY, chromePaint)
 
         val pctText = "${(overallPercent * 100f).roundToInt().coerceIn(0, 100)}%"
-        canvas.drawText(pctText, width - padH - chromePaint.measureText(pctText), footerY, chromePaint)
+        val pctW = pctWidthCached(pctText)
+        canvas.drawText(pctText, width - padH - pctW, footerY, chromePaint)
 
         if (batteryPct in 0..100) {
-            val batRight = width - padH - chromePaint.measureText(pctText) - 10 * density
+            val batRight = width - padH - pctW - 10 * density
             drawBattery(canvas, batRight, footerY - chromePaint.textSize * 0.18f)
         }
 
@@ -520,6 +560,27 @@ class PageView @JvmOverloads constructor(
             t = t.substring(0, t.length - 1)
         }
         return "$t…"
+    }
+
+    /** ellipsize 的 measureText 循环按（标题, 可用宽, 字号）缓存：换章/换设置才算一次 */
+    private fun ellipsizeCached(text: String, maxWidth: Float): String {
+        if (text == chromeChapterKey && maxWidth == chromeChapterW &&
+            chromePaint.textSize == chromeChapterTs
+        ) return chromeChapterText
+        val v = ellipsize(text, maxWidth)
+        chromeChapterKey = text
+        chromeChapterW = maxWidth
+        chromeChapterTs = chromePaint.textSize
+        chromeChapterText = v
+        return v
+    }
+
+    private fun pctWidthCached(pct: String): Float {
+        if (pct == chromePctText && chromePctW >= 0f) return chromePctW
+        val w = chromePaint.measureText(pct)
+        chromePctText = pct
+        chromePctW = w
+        return w
     }
 
     // ---------------- 图片 ----------------
@@ -601,19 +662,17 @@ class PageView @JvmOverloads constructor(
 
     // ---------------- 翻页过渡 ----------------
 
-    /** 把当前这一页拍成位图，翻页时让它滑出去 */
-    private fun captureGhost() {
-        val wpx = width
-        val hpx = height
-        if (wpx <= 0 || hpx <= 0) return
-        if (ghost == null || ghost!!.width != wpx || ghost!!.height != hpx) {
-            ghost?.recycle()
-            ghost = Bitmap.createBitmap(wpx, hpx, Bitmap.Config.RGB_565)
-        }
-        val bmp = ghost ?: return
+    /**
+     * 把当前页位图直接转手给残影：翻页前不必再全屏重绘一张 RGB_565（那要 2-4ms/次），
+     * 旧页内容本来就在 pageBitmap 里。页眉页脚不随残影滑动 —— 动画期间 chrome 固定，
+     * 与主流阅读器行为一致。转手后 pageBitmap 为空，buildPage 会为新页另起一张。
+     */
+    private fun handoffGhost() {
+        ghost?.recycle()
+        ghost = pageBitmap
+        pageBitmap = null
         ghostAlpha = 0f
         ghostX = 0f
-        draw(Canvas(bmp))
     }
 
     /**

@@ -137,7 +137,12 @@ class LayoutEngine(
             .build()
     }
 
-    fun paginate(blocks: List<Block>, fromBlock: Int, fromChar: Int): List<Page> {
+    fun paginate(
+        blocks: List<Block>,
+        fromBlock: Int,
+        fromChar: Int,
+        isCancelled: () -> Boolean = { false }
+    ): List<Page> {
         if (width <= 0 || height <= 0) return listOf(Page(fromBlock, fromChar, emptyList()))
 
         val pages = ArrayList<Page>()
@@ -161,6 +166,9 @@ class LayoutEngine(
         var segBlock = -1
 
         while (bi < blocks.size) {
+            // 协作式取消：字号连发时每个被打断的任务会把整章排完才被丢弃，纯烧 CPU。
+            // 部分结果无害 —— 调用方在已取消的 withContext 里拿到它也不会被使用
+            if (isCancelled()) return pages
             val b = blocks[bi]
 
             if (b.isImage) {
@@ -245,10 +253,16 @@ class LayoutEngine(
     }
 
     /** 只在 [fromBlock, endBlock) 范围内分页（章节边界） */
-    fun paginateRange(blocks: List<Block>, fromBlock: Int, fromChar: Int, endBlock: Int): List<Page> {
+    fun paginateRange(
+        blocks: List<Block>,
+        fromBlock: Int,
+        fromChar: Int,
+        endBlock: Int,
+        isCancelled: () -> Boolean = { false }
+    ): List<Page> {
         val end = endBlock.coerceIn(0, blocks.size)
         if (end <= fromBlock) return listOf(Page(fromBlock, fromChar, emptyList()))
-        return paginate(blocks.subList(0, end), fromBlock, fromChar)
+        return paginate(blocks.subList(0, end), fromBlock, fromChar, isCancelled)
     }
 
     private fun fitImage(rawW: Int, rawH: Int): Pair<Int, Int> {

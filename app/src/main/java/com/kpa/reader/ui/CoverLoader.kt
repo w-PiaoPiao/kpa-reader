@@ -9,6 +9,7 @@ import android.util.LruCache
 import com.kpa.reader.book.BookImporter
 import com.kpa.reader.data.Book
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
@@ -29,9 +30,13 @@ object CoverLoader {
     private val pool = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
 
+    /** 解码进行中的任务表：同一本书快速来回滚动时合并到首个任务，完成时一起回调 */
+    private val inFlight = ConcurrentHashMap<String, ArrayList<(Bitmap?) -> Unit>>()
+
     /**
      * [onReady] 一定在主线程回调（同步路径也 post 一帧，契约才成立）；
      * 没有封面（TXT、书里没图、文件缺失）时回 null，由调用方显示占位。
+     * 主线程不做任何文件访问，file.exists() 也丢给解码线程。
      */
     fun load(context: Context, book: Book, onReady: (Bitmap?) -> Unit) {
         if (book.cover.isBlank()) {
@@ -43,15 +48,21 @@ object CoverLoader {
             main.post { onReady(it) }
             return
         }
-        val file = BookImporter.imageFile(context.applicationContext, book.id, book.cover)
-        if (!file.exists()) {
-            main.post { onReady(null) }
+        val waiters = ArrayList<(Bitmap?) -> Unit>(2)
+        val existing = inFlight.putIfAbsent(key, waiters)
+        if (existing != null) {
+            synchronized(existing) { existing.add(onReady) }
             return
         }
+        waiters.add(onReady)
+        val appCtx = context.applicationContext
         pool.execute {
-            val bmp = decode(file)
+            val file = BookImporter.imageFile(appCtx, book.id, book.cover)
+            val bmp = if (file.exists()) decode(file) else null
             if (bmp != null) cache.put(key, bmp)
-            main.post { onReady(bmp) }
+            val cbs = inFlight.remove(key) ?: return@execute
+            val snapshot = synchronized(cbs) { cbs.toList() }
+            main.post { snapshot.forEach { it(bmp) } }
         }
     }
 
