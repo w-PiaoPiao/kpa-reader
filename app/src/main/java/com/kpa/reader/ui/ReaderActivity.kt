@@ -184,14 +184,21 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     }
 
     private fun setMenuVisible(visible: Boolean) {
-        menuOverlay.visibility = if (visible) View.VISIBLE else View.GONE
+        menuOverlay.animate().cancel()
         if (visible) {
+            // 打开时 120ms 淡入只做 alpha，焦点立即给：动画期间按键就要能操作。
+            // 关闭保持硬切 —— 淡出期间焦点悬空、按键穿透，复杂度不值得
+            menuOverlay.alpha = 0f
+            menuOverlay.visibility = View.VISIBLE
+            menuOverlay.animate().alpha(1f).setDuration(120L).start()
             // 阅读区在 touch mode 下会一直占着焦点，菜单打开时必须让出，
             // 否则十字键的导航起点还在 PageView 上，菜单按钮选不中
             pageView.isFocusable = false
             pageView.isFocusableInTouchMode = false
             menuOverlay.findViewById<View>(R.id.btnToc)?.requestFocus()
         } else {
+            menuOverlay.alpha = 1f
+            menuOverlay.visibility = View.GONE
             pageView.isFocusable = true
             pageView.isFocusableInTouchMode = true
             pageView.requestFocus()
@@ -320,6 +327,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         handler.removeCallbacks(saveRunnable)
         handler.removeCallbacks(batteryTick)
         handler.removeCallbacks(hideFirstHint)
+        handler.removeCallbacks(fontToastRun)
         saveProgressNow()
         // 书库是异步写盘的，退出前等它落地，避免刚翻完页就切后台丢进度
         store.flush()
@@ -335,6 +343,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         handler.removeCallbacks(saveRunnable)
         handler.removeCallbacks(batteryTick)
         handler.removeCallbacks(hideFirstHint)
+        handler.removeCallbacks(fontToastRun)
         super.onDestroy()
     }
 
@@ -375,8 +384,11 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         val nextKey = Keymap.name(Keymap.codeOf(Gamepad.Action.NEXT_PAGE))
         val menuKey = Keymap.name(Keymap.codeOf(Gamepad.Action.TOGGLE_MENU))
         tvFirstHint.text = "十字键 翻页　·　$nextKey 下一页\n$menuKey 菜单　·　B 连按两次返回书架"
-        tvFirstHint.alpha = 1f
+        // 出现淡入对齐消失的淡出，避免同一条提示一硬切一渐隐
+        tvFirstHint.animate().cancel()
+        tvFirstHint.alpha = 0f
         tvFirstHint.visibility = View.VISIBLE
+        tvFirstHint.animate().alpha(1f).setDuration(200L).start()
         handler.postDelayed(hideFirstHint, 4000L)
     }
 
@@ -444,14 +456,26 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
     // ---------------- 功能 ----------------
 
-    private fun changeFont(delta: Float) {
+    private fun changeFont(delta: Float, fromRepeat: Boolean = false) {
         val next = settings.copy(fontSizeSp = (settings.fontSizeSp + delta).coerceIn(12f, 36f))
         if (next.fontSizeSp == settings.fontSizeSp) return
         settings = next
         settingsStore.save(settings)
         pageView.configure(settings)
         updateHeader()
-        toast("字号 ${settings.fontSizeSp.toInt()}")
+        showFontToast(fromRepeat)
+    }
+
+    /** 连发时 80ms 一次 toast 会被反复重置成常驻闪字；去抖 350ms，停手后弹一次最终字号 */
+    private val fontToastRun = Runnable { toast("字号 ${settings.fontSizeSp.toInt()}") }
+
+    private fun showFontToast(fromRepeat: Boolean) {
+        handler.removeCallbacks(fontToastRun)
+        if (fromRepeat) {
+            handler.postDelayed(fontToastRun, 350L)
+        } else {
+            toast("字号 ${settings.fontSizeSp.toInt()}")
+        }
     }
 
     private fun cycleTheme() {
@@ -557,7 +581,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     }
 
     private fun showSearch(initialQuery: String? = null) {
+        searchOverlay.animate().cancel()
+        searchOverlay.alpha = 0f
         searchOverlay.visibility = View.VISIBLE
+        searchOverlay.animate().alpha(1f).setDuration(120L).start()
         searchInput.requestFocus()
         getSystemService(InputMethodManager::class.java)
             ?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
@@ -568,6 +595,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     }
 
     private fun hideSearch() {
+        searchOverlay.animate().cancel()
+        searchOverlay.alpha = 1f
         handler.removeCallbacks(searchDebounceRunnable)
         searchOverlay.visibility = View.GONE
         getSystemService(InputMethodManager::class.java)
@@ -1233,8 +1262,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             Gamepad.Action.SHOW_BOOKMARKS -> showBookmarks()
             Gamepad.Action.TOGGLE_MENU -> toggleMenu()
             Gamepad.Action.TOGGLE_NIGHT -> toggleNight()
-            Gamepad.Action.FONT_DOWN -> changeFont(-1f)
-            Gamepad.Action.FONT_UP -> changeFont(1f)
+            Gamepad.Action.FONT_DOWN -> changeFont(-1f, fromRepeat)
+            Gamepad.Action.FONT_UP -> changeFont(1f, fromRepeat)
             Gamepad.Action.BACK -> {
                 if (menuOverlay.visibility == View.VISIBLE) setMenuVisible(false) else requestExit()
             }

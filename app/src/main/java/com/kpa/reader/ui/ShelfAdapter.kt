@@ -4,6 +4,7 @@ import android.content.res.ColorStateList
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -77,11 +78,13 @@ class ShelfAdapter(
             true
         }
         holder.cardBox.setOnFocusChangeListener { v, hasFocus ->
+            // 110ms + 快起缓收：与逐张滚动的 ~100ms 节奏同步，又比 90ms 的"弹一下"顺
             v.animate().scaleX(if (hasFocus) SEL_SCALE else IDLE_SCALE)
                 .scaleY(if (hasFocus) SEL_SCALE else IDLE_SCALE)
                 .alpha(if (hasFocus) 1f else IDLE_ALPHA)
                 .translationZ(if (hasFocus) SEL_Z else 0f)
-                .setDuration(90L)
+                .setDuration(110L)
+                .setInterpolator(DecelerateInterpolator(1.5f))
                 .start()
             if (hasFocus) onFocus(b, position)
         }

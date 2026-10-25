@@ -17,6 +17,7 @@ import android.util.LruCache
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import com.kpa.reader.data.ReaderSettings
 import com.kpa.reader.doc.Document
 import com.kpa.reader.doc.LayoutEngine
@@ -167,6 +168,8 @@ class PageView @JvmOverloads constructor(
         pageIndex = 0
         renderedText = emptyList()
         renderedImages = emptyList()
+        // 跨章时残影可能还在滑，cancel 掉免得它在换章后空转几帧
+        ghostAnim?.cancel()
         ghost?.recycle(); ghost = null; ghostAlpha = 1f; ghostX = 0f
         pendingLastPage = lastPage
         rebuildEngine()
@@ -254,14 +257,16 @@ class PageView @JvmOverloads constructor(
     fun nextPage(animated: Boolean = true): Boolean {
         if (pages.isEmpty()) return false
         if (pageIndex + 1 >= pages.size) return listener?.onBoundary(true) == true
-        if (animated) {
+        if (animated && ghostAnim?.isRunning != true) {
             captureGhost()
             pageIndex++
             buildPage()
             startFlip(forward = true)
         } else {
-            // 连发路径不拍 ghost：170ms 的滑动动画会被 80ms 的连发节奏反复打断，
-            // 残影看起来像在原地抖，直接硬切反而干净
+            // 连发或上一个残影还没滑完（快速点按）都硬切：170ms 的动画被更快的
+            // 翻页节奏反复重启，残影像在原地抖；且跑着的残影内容已对不上新页
+            ghostAnim?.cancel()
+            ghostAlpha = 0f
             pageIndex++
             buildPage()
             invalidate()
@@ -273,12 +278,14 @@ class PageView @JvmOverloads constructor(
     fun prevPage(animated: Boolean = true): Boolean {
         if (pages.isEmpty()) return false
         if (pageIndex - 1 < 0) return listener?.onBoundary(false) == true
-        if (animated) {
+        if (animated && ghostAnim?.isRunning != true) {
             captureGhost()
             pageIndex--
             buildPage()
             startFlip(forward = false)
         } else {
+            ghostAnim?.cancel()
+            ghostAlpha = 0f
             pageIndex--
             buildPage()
             invalidate()
@@ -563,6 +570,8 @@ class PageView @JvmOverloads constructor(
         val w = width.toFloat().coerceAtLeast(1f)
         ghostAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 170
+            // 推页的力道集中在前段：快起缓收比默认的先加速再减速更利落
+            interpolator = DecelerateInterpolator(2f)
             addUpdateListener {
                 val p = it.animatedValue as Float
                 ghostX = dir * w * 0.55f * p
