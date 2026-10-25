@@ -40,7 +40,7 @@ object EpubParser {
 
     private val OPF_ITEM = Regex("<item\\s+[^>]*>", RegexOption.IGNORE_CASE)
     private val SPINE_REF = Regex("<itemref\\s+[^>]*>", RegexOption.IGNORE_CASE)
-    private val ATTR = Regex("([a-zA-Z:_-]+)\\s*=\\s*\"([^\"]*)\"")
+    private val ATTR = Regex("([a-zA-Z:_-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')")
 
     private val KEEP_EXT = listOf(".xhtml", ".html", ".htm", ".opf", ".ncx", ".xml")
     private val IMG_EXT = listOf(".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
@@ -173,6 +173,11 @@ object EpubParser {
 
         val toc = readToc(entries, opfPath, baseDir)
 
+        // 大小写不敏感查找索引：每张图都遍历一遍所有 entry 是 O(n²)，
+        // 几千 entry 的书光是图片定位就要百万次字符串比较
+        val lowerIndex = HashMap<String, String>(entries.size)
+        entries.keys.forEach { lowerIndex.putIfAbsent(it.lowercase(), it) }
+
         // 封面按 OPF 声明取，不能拿「正文第一张图」凑数 ——
         // 很多书第一张图是扉页、印章或出版社 logo（《剑来》就是这样取错的）
         val coverPath = readCoverHref(opf, baseDir)
@@ -205,8 +210,7 @@ object EpubParser {
                     }
                     is HtmlBlockParser.Spec.Img -> {
                         val imgPath = resolvePath(pageDir, spec.src)
-                        val real = entries.keys.firstOrNull { it == imgPath }
-                            ?: entries.keys.firstOrNull { it.equals(imgPath, ignoreCase = true) }
+                        val real = findEntry(entries, lowerIndex, imgPath)
                         if (real != null) {
                             usedImages.add(real)
                             blocks.add(Block.image(real, sb.length))
@@ -234,8 +238,7 @@ object EpubParser {
         // 封面即使正文没引用（没有封面页的 EPUB 很常见）也要存进去，否则书架没图可用
         var realCover = ""
         if (coverPath.isNotBlank()) {
-            val real = entries.keys.firstOrNull { it == coverPath }
-                ?: entries.keys.firstOrNull { it.equals(coverPath, ignoreCase = true) }
+            val real = findEntry(entries, lowerIndex, coverPath)
             if (real != null) {
                 images[real] = entries.getValue(real)
                 realCover = real
@@ -342,15 +345,35 @@ object EpubParser {
     private fun cleanTitle(t: String): String =
         t.replace(Regex("[\\s\\u00A0]+"), " ").trim().take(60).ifEmpty { "正文" }
 
-    private fun parseAttrs(tag: String): Map<String, String> {
+    /** internal 仅供单元测试 */
+    internal fun parseAttrs(tag: String): Map<String, String> {
         val map = HashMap<String, String>()
-        ATTR.findAll(tag).forEach { map[it.groupValues[1].lowercase()] = it.groupValues[2] }
+        ATTR.findAll(tag).forEach {
+            val v = it.groupValues[2].ifEmpty { it.groupValues[3] }
+            map[it.groupValues[1].lowercase()] = v
+        }
         return map
     }
 
-    private fun resolvePath(baseDir: String, href: String): String {
+    /** 精确命中直接用；否则查大小写索引，且目标必须还在 entries 里（可能已被逐章消费） */
+    private fun findEntry(
+        entries: Map<String, ByteArray>,
+        lowerIndex: Map<String, String>,
+        path: String
+    ): String? {
+        if (entries.containsKey(path)) return path
+        val lower = lowerIndex[path.lowercase()] ?: return null
+        return if (entries.containsKey(lower)) lower else null
+    }
+
+    /** internal 仅供单元测试 */
+    internal fun resolvePath(baseDir: String, href: String): String {
         val clean = href.substringBefore('#')
-        val decoded = runCatching { URLDecoder.decode(clean, "UTF-8") }.getOrDefault(clean)
+        // 只在真的出现 % 时才做百分号解码：zip 内路径里的裸 + 是文件名的一部分，
+        // URLDecoder 会把它当空格，%2B 才是编码过的加号
+        val decoded = if (clean.contains('%')) {
+            runCatching { URLDecoder.decode(clean, "UTF-8") }.getOrDefault(clean)
+        } else clean
         val combined = if (decoded.startsWith("/")) {
             decoded.trimStart('/')
         } else if (baseDir.isEmpty()) {
