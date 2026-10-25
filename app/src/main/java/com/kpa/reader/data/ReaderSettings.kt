@@ -46,7 +46,8 @@ class SettingsStore(context: Context) {
     private val sp = context.applicationContext.getSharedPreferences("reader_settings", Context.MODE_PRIVATE)
 
     fun load(): ReaderSettings = ReaderSettings(
-        fontSizeSp = sp.getFloat("font_size", 16f).coerceIn(12f, 40f),
+        // 上限 36 与 ReaderActivity.changeFont、设置面板滑块三处统一
+        fontSizeSp = sp.getFloat("font_size", 16f).coerceIn(12f, 36f),
         lineSpacingMult = sp.getFloat("line_mult", 1.15f).coerceIn(0.85f, 2.2f),
         paragraphSpacingEm = sp.getFloat("para_sp", 0.3f).coerceIn(0f, 1.5f),
         padHdp = sp.getInt("pad_h", 20).coerceIn(4, 80),

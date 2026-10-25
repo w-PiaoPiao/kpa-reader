@@ -116,14 +116,17 @@ object HtmlBlockParser {
                             "h3", "h4", "h5", "h6" -> style = Block.H3
                             "blockquote" -> quoteDepth++
                         }
-                    } else if (tag.closing || tag.selfClose) {
-                        when (name) {
-                            "h1", "h2", "h3", "h4", "h5", "h6" -> style = stack.removeLastOrNull() ?: Block.BODY
-                            "blockquote" -> {
-                                if (quoteDepth > 0) quoteDepth--
-                                style = stack.removeLastOrNull() ?: Block.BODY
+                    } else if (tag.closing) {
+                        // 对称弹栈：p/div 的开标签也 push 过，闭标签必须 pop ——
+                        // 否则栈只增不减，后面 h 的闭标签会弹到别人压的值、样式恢复错。
+                        // selfClose 不 push 也就不 pop。乱序闭合（</p> 配 <h2>）无解，不管。
+                        if (stack.isNotEmpty()) {
+                            val restored = stack.removeAt(stack.size - 1)
+                            when (name) {
+                                "h1", "h2", "h3", "h4", "h5", "h6", "blockquote" -> style = restored
                             }
                         }
+                        if (name == "blockquote" && quoteDepth > 0) quoteDepth--
                     }
                     continue
                 }
