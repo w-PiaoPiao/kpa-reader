@@ -30,22 +30,32 @@ class BookStore private constructor(private val appContext: Context) {
 
     init {
         load()
-        migrateCovers()
+        // 迁移要读 blocks 文件（几百 KB 级），挪出主线程；书架数据本身 load 已同步就绪，
+        // 封面晚一拍补上无感。io 是单线程队列，这里的 persist 排在它后面，不会竞争。
+        io.execute { migrateCovers() }
     }
 
     private fun load() {
         synchronized(lock) {
             books.clear()
-            if (!file.exists()) return
-            runCatching {
-                val arr = JSONArray(file.readText(Charsets.UTF_8))
-                for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    val b = Book.fromJson(o)
-                    if (b.id.isNotEmpty()) books.add(b)
-                }
+            if (!readInto(file)) {
+                // 主文件缺失或损坏：写盘是 tmp+rename，中断后 tmp 可能比主文件新，试着救回来。
+                // 两处都读不出来才认空库 —— 否则一次损坏 JSON 会被下次 persist 覆盖成空书架。
+                readInto(File(file.parentFile, "library.json.tmp"))
             }
         }
+    }
+
+    private fun readInto(f: File): Boolean {
+        if (!f.exists()) return false
+        val parsed = runCatching { JSONArray(f.readText(Charsets.UTF_8)) }.getOrNull()
+            ?: return false
+        for (i in 0 until parsed.length()) {
+            val o = parsed.optJSONObject(i) ?: continue
+            val b = Book.fromJson(o)
+            if (b.id.isNotEmpty()) books.add(b)
+        }
+        return true
     }
 
     /**
@@ -65,9 +75,10 @@ class BookStore private constructor(private val appContext: Context) {
                     Document.parseBlocks(blockFile.readText(Charsets.UTF_8))
                         .firstOrNull { it.isImage }?.image
                 }.getOrNull() ?: runCatching {
-                    // MOBI/AZW3 的图片不进 blocks，退回去看 img 目录里编号最小的那张
+                    // MOBI/AZW3 的图片不进 blocks，退回去看 img 目录里编号最小的那张。
+                    // 按 img_N 的 N 数值排：字典序会把 img_10 排到 img_2 前面。
                     File(dir, "${b.id}.img").listFiles()
-                        ?.sortedBy { it.name }?.firstOrNull()?.name
+                        ?.sortedBy { it.name.imageOrdinal() }?.firstOrNull()?.name
                 }.getOrNull()
                 if (!cover.isNullOrBlank()) {
                     books[i] = b.copy(cover = cover)
@@ -124,8 +135,13 @@ class BookStore private constructor(private val appContext: Context) {
                     snapshot.forEach { arr.put(it.toJson()) }
                     val tmp = File(file.parentFile, "library.json.tmp")
                     tmp.writeText(arr.toString(), Charsets.UTF_8)
-                    if (file.exists()) file.delete()
-                    tmp.renameTo(file)
+                    // POSIX rename 在目标已存在时是原子覆盖；先 delete 再 rename 反而留出
+                    // 「主文件已删、新文件未到」的窗口，断电即全库丢失。Android filesDir 上
+                    // renameTo 覆盖可靠，失败才退回老办法兜底。
+                    if (!tmp.renameTo(file)) {
+                        file.delete()
+                        tmp.renameTo(file)
+                    }
                 }
             }
         }
@@ -147,3 +163,8 @@ class BookStore private constructor(private val appContext: Context) {
         }
     }
 }
+
+/** "img_12.jpg" → 12；不匹配生成式的名字排最后（保持稳定序） */
+private fun String.imageOrdinal(): Int =
+    substringAfter("img_", missingDelimiterValue = "")
+        .takeWhile { it.isDigit() }.toIntOrNull() ?: Int.MAX_VALUE
