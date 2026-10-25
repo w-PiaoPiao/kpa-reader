@@ -109,10 +109,11 @@ object BookImporter {
         }
 
         // 封面优先级：解析器声明的（EPUB 的 OPF cover）> 正文第一张图 > 提取出的第一张
-        // MOBI/AZW3 的图片按 recindex 引用、不进 blocks，所以最后一步是给它们兜底的
+        // MOBI/AZW3 的图片按 recindex 引用、不进 blocks，所以最后一步是给它们兜底的。
+        // 按 img_N 的 N 数值排：字典序会把 img_10 排到 img_2 前面。
         val coverName = nameMap[content.cover]
             ?: blocks.firstOrNull { it.isImage }?.image
-            ?: images.keys.sorted().firstOrNull()
+            ?: images.keys.sortedBy { it.imageOrdinal() }.firstOrNull()
             ?: ""
 
         val now = System.currentTimeMillis()
@@ -179,3 +180,8 @@ object BookImporter {
         }.getOrNull()
     }
 }
+
+/** "img_12.jpg" → 12；不匹配生成式的名字排最后（保持稳定序） */
+private fun String.imageOrdinal(): Int =
+    substringAfter("img_", missingDelimiterValue = "")
+        .takeWhile { it.isDigit() }.toIntOrNull() ?: Int.MAX_VALUE

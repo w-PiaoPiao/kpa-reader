@@ -32,6 +32,9 @@ data class Block(
  * 序列化用极简的行格式（比 JSON 小一个数量级，几万块也只要几百 KB）：
  *   T,start,end,style
  *   I,filename,anchor
+ *
+ * **契约：图片文件名不得含逗号**（行内用逗号分隔，parseBlocks 按 split(',') 解析会截断）。
+ * 这个保证由 BookImporter.remapImages 落实 —— 所有图片统一重命名为 `img_N.ext`。
  */
 class Document(
     val text: String,

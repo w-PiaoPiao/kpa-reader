@@ -98,12 +98,15 @@ object ChapterSplitter {
         return out
     }
 
-    /** 在全书里定位某个字符偏移属于哪一章 */
+    /** 在全书里定位某个字符偏移属于哪一章（chapters 的 end 单调递增，二分） */
     fun chapterIndexAt(chapters: List<Chapter>, offset: Int): Int {
         if (chapters.isEmpty()) return 0
-        for (i in chapters.indices) {
-            if (offset < chapters[i].end) return i
+        var lo = 0
+        var hi = chapters.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (offset < chapters[mid].end) hi = mid else lo = mid + 1
         }
-        return chapters.size - 1
+        return lo
     }
 }
