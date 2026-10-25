@@ -272,13 +272,15 @@ class PageView @JvmOverloads constructor(
         layoutJob = sc.launch {
             val result = withContext(Dispatchers.Default) {
                 val job = coroutineContext[Job]
-                e.paginateRange(blocks, startBlock, startChar, chapterEnd) { job?.isActive != false }
+                // 回调语义是 isCancelled：job 不活跃才算取消。
+                // 之前写成 != false（活跃=true 被当已取消），分页第一轮就返回空列表，
+                // 打开任何书都 0 页无文字（v1.7.4 引入，v1.7.7 修复）
+                e.paginateRange(blocks, startBlock, startChar, chapterEnd) { job?.isActive == false }
             }
             pages = result
             pageIndex = if (toLastPage) (result.size - 1).coerceAtLeast(0) else 0
             pendingChar = -1
             renderCache.clear()
-            pendingChar = -1
             buildPage()
             invalidate()
             listener?.onLayoutState(false)
