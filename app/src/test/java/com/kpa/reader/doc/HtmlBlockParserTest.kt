@@ -64,4 +64,28 @@ class HtmlBlockParserTest {
         val texts = specs.filterIsInstance<HtmlBlockParser.Spec.Text>().map { it.text }
         assertEquals(listOf("第一段", "第二段", "第三段"), texts)
     }
+
+    @Test
+    fun `闭标签后样式恢复成正文`() {
+        val html = """<h2>标题一</h2><p>段一</p><h2>标题二</h2><p>段二</p>"""
+        val specs = HtmlBlockParser.parse(html)
+        val styles = specs.filterIsInstance<HtmlBlockParser.Spec.Text>().map { it.style }
+        assertEquals(listOf(Block.H2, Block.BODY, Block.H2, Block.BODY), styles)
+    }
+
+    @Test
+    fun `嵌套标题逐层恢复样式`() {
+        val html = """<h1><h2>双标题</h2>外层</h1><p>正文</p>"""
+        val specs = HtmlBlockParser.parse(html)
+        val styles = specs.filterIsInstance<HtmlBlockParser.Spec.Text>().map { it.style }
+        assertEquals(listOf(Block.H2, Block.H1, Block.BODY), styles)
+    }
+
+    @Test
+    fun `blockquote 闭合后回到正文样式`() {
+        val html = """<blockquote>引用内容</blockquote><p>正文</p>"""
+        val specs = HtmlBlockParser.parse(html)
+        val styles = specs.filterIsInstance<HtmlBlockParser.Spec.Text>().map { it.style }
+        assertEquals(listOf(Block.QUOTE, Block.BODY), styles)
+    }
 }

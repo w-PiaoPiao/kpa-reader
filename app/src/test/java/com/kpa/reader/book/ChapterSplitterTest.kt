@@ -51,4 +51,50 @@ class ChapterSplitterTest {
         assertEquals(0, ChapterSplitter.chapterIndexAt(chapters, 0))
         assertEquals(1, ChapterSplitter.chapterIndexAt(chapters, text.length - 1))
     }
+
+    @Test
+    fun `虚拟分章优先切在换行处`() {
+        // 9995 个 a 后紧跟换行：10000 切点应回退到 \n 之后，不把一行劈成两半
+        val text = "a".repeat(9995) + "\n" + "b".repeat(10010)
+        val chapters = ChapterSplitter.split(text, chunkChars = 10000)
+        assertEquals(3, chapters.size)
+        assertEquals(9996, chapters[0].end)
+        assertEquals('\n', text[chapters[0].end - 1])
+        // 其余两块之间没有换行可用，按字数硬切，但必须首尾相接
+        for (i in 1 until chapters.size) {
+            assertEquals(chapters[i - 1].end, chapters[i].start)
+        }
+        assertEquals(text.length, chapters.last().end)
+    }
+
+    @Test
+    fun `二分定位与线性扫描语义等价`() {
+        val text = buildString {
+            for (i in 1..50) {
+                append("第").append(i).append("章 标题\n").append("内容".repeat(30)).append('\n')
+            }
+        }
+        val chapters = ChapterSplitter.split(text)
+
+        fun linear(offset: Int): Int {
+            for (i in chapters.indices) if (offset < chapters[i].end) return i
+            return chapters.size - 1
+        }
+
+        // 章首、章中、章尾、末尾、越界值全扫一遍
+        val probes = ArrayList<Int>()
+        for (ch in chapters) {
+            probes.add(ch.start)
+            probes.add((ch.start + ch.end) / 2)
+            probes.add(ch.end - 1)
+            probes.add(ch.end)
+        }
+        probes.add(text.length)
+        probes.add(text.length + 1000)
+        for (off in probes) {
+            assertEquals("offset=$off", linear(off), ChapterSplitter.chapterIndexAt(chapters, off))
+        }
+        // 空目录兜底
+        assertEquals(0, ChapterSplitter.chapterIndexAt(emptyList(), 5))
+    }
 }
