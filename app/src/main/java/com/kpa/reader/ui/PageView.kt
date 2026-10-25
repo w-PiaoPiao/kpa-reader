@@ -106,6 +106,10 @@ class PageView @JvmOverloads constructor(
     private var ghostAnim: ValueAnimator? = null
     private var layoutJob: Job? = null
 
+    /** 当前页正文的预渲染位图（整页含底色，不含页眉页脚）：动画帧只画位图，不重跑文本绘制 */
+    private var pageBitmap: Bitmap? = null
+    private val pageCanvas = Canvas()
+
     /** 分页还没完成时的临时位置，保证进度计算不跳变 */
     private var pendingChar = -1
 
@@ -124,13 +128,20 @@ class PageView @JvmOverloads constructor(
 
     fun configure(settings: ReaderSettings) {
         val changed = this.settings != settings
+        val themeChanged = this.settings.theme != settings.theme
         this.settings = settings
         applyPaints()
         if (changed && doc != null) {
             // 字号/字体变了要重建引擎：标题用的 Paint 是正文 Paint 的副本，不重建不会跟着变
             rebuildEngine()
+            if (themeChanged) {
+                // 主题色变了先刷位图底色：异步重排完成前背景就跟上新主题，
+                // 字色等重排完一起换（与直接画 renderedText 的旧行为一致）
+                renderPageBitmap()
+            }
             relayout(currentCharOffset())
         } else {
+            if (themeChanged) renderPageBitmap()
             invalidate()
         }
     }
@@ -152,6 +163,8 @@ class PageView @JvmOverloads constructor(
         imageDir = imgDir
         sizeCache.clear()
         bitmapCache.evictAll()
+        pageBitmap?.recycle()
+        pageBitmap = null
     }
 
     /**
@@ -171,6 +184,8 @@ class PageView @JvmOverloads constructor(
         // 跨章时残影可能还在滑，cancel 掉免得它在换章后空转几帧
         ghostAnim?.cancel()
         ghost?.recycle(); ghost = null; ghostAlpha = 1f; ghostX = 0f
+        // 清掉旧章的页位图：异步分页完成前显示纯背景，与置空 renderedText 的行为一致
+        renderPageBitmap()
         pendingLastPage = lastPage
         rebuildEngine()
         relayout(absoluteChar)
@@ -200,6 +215,7 @@ class PageView @JvmOverloads constructor(
         val blocks = d.blocks
         if (blocks.isEmpty() || chapterEnd <= chapterStart) {
             pages = emptyList(); renderedText = emptyList(); renderedImages = emptyList()
+            renderPageBitmap()
             invalidate(); return
         }
         val e = engine ?: run { rebuildEngine(); engine } ?: return
@@ -311,7 +327,9 @@ class PageView @JvmOverloads constructor(
         val d = doc ?: return
         val e = engine ?: return
         val page = pages.getOrNull(pageIndex) ?: run {
-            renderedText = emptyList(); renderedImages = emptyList(); return
+            renderedText = emptyList(); renderedImages = emptyList()
+            renderPageBitmap()
+            return
         }
         val texts = ArrayList<Rendered>(page.items.size)
         val imgs = ArrayList<LayoutEngine.Item.Img>(2)
@@ -329,7 +347,65 @@ class PageView @JvmOverloads constructor(
         }
         renderedText = texts
         renderedImages = imgs
+        renderPageBitmap()
         preloadImages(imgs)
+    }
+
+    /**
+     * 正文（文本段 + 图片）预渲染进整页位图：翻页动画期间每帧只画这一张，
+     * 不再重复跑 StaticLayout 文本绘制——低端掌机上那要 5-15ms/帧，动画必掉帧。
+     *
+     * 用 ARGB_8888：文本常驻显示，565 的量化会让抗锯齿边缘发糙；
+     * setHasAlpha(false) 让 drawBitmap 走不透明快路径。页眉页脚不进位图，
+     * 电量/进度这类 chrome 变化只 invalidate，不用重画正文。
+     */
+    private fun renderPageBitmap() {
+        val w = width
+        val h = height
+        if (w <= 0 || h <= 0) { pageBitmap = null; return }
+        // 空页（换章分页中）不留位图，onDraw 退回纯背景色
+        if (renderedText.isEmpty() && renderedImages.isEmpty()) {
+            pageBitmap?.recycle()
+            pageBitmap = null
+            return
+        }
+        var bmp = pageBitmap
+        if (bmp == null || bmp.isRecycled || bmp.width != w || bmp.height != h) {
+            bmp?.recycle()
+            bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bmp.setHasAlpha(false)
+            pageBitmap = bmp
+        }
+        bmp.eraseColor(settings.theme.bg)
+        pageCanvas.setBitmap(bmp)
+        val padH = (settings.padHdp * density).roundToInt()
+        pageCanvas.save()
+        pageCanvas.clipRect(
+            0f, topInset().toInt().toFloat(),
+            w.toFloat(), (topInset() + contentHeight()).toInt().toFloat()
+        )
+        pageCanvas.translate(padH.toFloat(), topInset())
+
+        for (r in renderedText) {
+            pageCanvas.save()
+            pageCanvas.translate(0f, r.y.toFloat())
+            r.layout.draw(pageCanvas)
+            pageCanvas.restore()
+        }
+        for (img in renderedImages) {
+            val left = (contentWidth() - img.w) / 2f
+            val dst = RectF(left, img.y.toFloat(), left + img.w, img.y + img.h.toFloat())
+            val b = bitmapCache.get(img.name)
+            if (b != null) {
+                pageCanvas.drawBitmap(b, null, dst, imagePaint)
+            } else {
+                // 还没解出来的先画占位：解好一张 preloadImages 会重跑这里
+                pageCanvas.drawRoundRect(dst, 8f, 8f, placeholderPaint)
+            }
+        }
+
+        pageCanvas.restore()
+        pageCanvas.setBitmap(null)
     }
 
     private fun contentWidth(): Int =
@@ -359,33 +435,12 @@ class PageView @JvmOverloads constructor(
         canvas.drawColor(settings.theme.bg)
         val padH = (settings.padHdp * density).roundToInt()
 
-        canvas.save()
-        canvas.clipRect(
-            0f, topInset().toInt().toFloat(),
-            width.toFloat(), (topInset() + contentHeight()).toInt().toFloat()
-        )
-        canvas.translate(padH.toFloat(), topInset())
-
-        for (r in renderedText) {
-            canvas.save()
-            canvas.translate(0f, r.y.toFloat())
-            r.layout.draw(canvas)
-            canvas.restore()
-        }
-
-        for (img in renderedImages) {
-            val left = (contentWidth() - img.w) / 2f
-            val dst = RectF(left, img.y.toFloat(), left + img.w, img.y + img.h.toFloat())
-            val bmp = bitmapCache.get(img.name)
-            if (bmp != null) {
-                canvas.drawBitmap(bmp, null, dst, imagePaint)
-            } else {
-                // 还没解出来时画个占位，避免一次性 decode 卡住绘制
-                canvas.drawRoundRect(dst, 8f, 8f, placeholderPaint)
+        // 正文一张位图上去（内部已裁剪/偏移好），动画帧从这里受益
+        pageBitmap?.let { bmp ->
+            if (bmp.width == width && bmp.height == height) {
+                canvas.drawBitmap(bmp, 0f, 0f, null)
             }
         }
-
-        canvas.restore()
         drawChrome(canvas, padH)
 
         ghost?.let { bmp ->
@@ -508,7 +563,11 @@ class PageView @JvmOverloads constructor(
         sc.launch {
             for (name in need) {
                 val bmp = withContext(Dispatchers.IO) { decodeBitmap(name) } ?: continue
-                if (bmp.isRecycled.not()) invalidate()
+                if (bmp.isRecycled.not()) {
+                    // 重画整页位图再上屏：图片只存在于位图里，单独 invalidate 看不到
+                    renderPageBitmap()
+                    invalidate()
+                }
             }
         }
     }
@@ -594,6 +653,8 @@ class PageView @JvmOverloads constructor(
         layoutJob?.cancel()
         ghost?.recycle()
         ghost = null
+        pageBitmap?.recycle()
+        pageBitmap = null
         bitmapCache.evictAll()
         super.onDetachedFromWindow()
     }
