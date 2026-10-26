@@ -4,6 +4,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.ColorStateList
 import android.graphics.drawable.ColorDrawable
 import android.os.BatteryManager
 import android.os.Bundle
@@ -74,6 +75,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         /** 预览文本压空白用：searchAll 每条命中都要跑，不能在循环里反复编译 */
         private val WS_REGEX = Regex("\\s+")
 
+        /** 章节名自带编号的两种常见写法：「第 2 节」「1. 序」（章号与量词之间常带空格） */
+        private val NUMBERED_HEADING = Regex("^第\\s*[0-9零一二三四五六七八九十百千两]+\\s*[章节卷部回篇]")
+        private val PLAIN_INDEX = Regex("^\\d+[.、\\s]")
+
         fun intentOf(context: Context, bookId: String, searchQuery: String? = null): Intent {
             val i = Intent(context, ReaderActivity::class.java).putExtra(EXTRA_ID, bookId)
             if (!searchQuery.isNullOrBlank()) i.putExtra(EXTRA_SEARCH, searchQuery)
@@ -112,6 +117,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
     /** 页脚电量；-1 未知。阅读页屏幕常亮又没有系统状态栏，电量只有这里能看 */
     private var batteryPct = -1
     private var lowBatteryToasted = false
+
+    /** 菜单逻辑状态：关闭淡出期间 visibility 仍是 VISIBLE，按键路由不能看它 */
+    private var menuOpen = false
 
     private val batteryTick = Runnable { refreshBattery(reschedule = true) }
 
@@ -191,8 +199,6 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         findViewById<View>(R.id.btnSearch).setOnClickListener { showSearch() }
         findViewById<View>(R.id.btnBookmark).setOnClickListener { addBookmark() }
         findViewById<View>(R.id.btnBookmarks).setOnClickListener { showBookmarks() }
-        findViewById<View>(R.id.btnFontDown).setOnClickListener { changeFont(-1f) }
-        findViewById<View>(R.id.btnFontUp).setOnClickListener { changeFont(1f) }
         findViewById<View>(R.id.btnTheme).setOnClickListener { cycleTheme() }
         findViewById<View>(R.id.btnNight).setOnClickListener { toggleNight() }
         findViewById<View>(R.id.btnSettings).setOnClickListener { showSettings() }
@@ -201,9 +207,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
     private fun setMenuVisible(visible: Boolean) {
         menuOverlay.animate().cancel()
+        menuOverlay.alpha = 1f
         if (visible) {
             // 打开时 120ms 淡入只做 alpha，焦点立即给：动画期间按键就要能操作。
-            // 关闭保持硬切 —— 淡出期间焦点悬空、按键穿透，复杂度不值得
+            menuOpen = true
             menuOverlay.alpha = 0f
             menuOverlay.visibility = View.VISIBLE
             menuOverlay.animate().alpha(1f).setDuration(120L).start()
@@ -213,15 +220,20 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             pageView.isFocusableInTouchMode = false
             menuOverlay.findViewById<View>(R.id.btnToc)?.requestFocus()
         } else {
-            menuOverlay.alpha = 1f
-            menuOverlay.visibility = View.GONE
+            // 焦点与按键路由先切干净，再让浮层淡出：
+            // 淡出这 90ms 里按键已经回到阅读页，不会误触菜单按钮
+            menuOpen = false
             pageView.isFocusable = true
             pageView.isFocusableInTouchMode = true
             pageView.requestFocus()
+            menuOverlay.animate().alpha(0f).setDuration(90L).withEndAction {
+                menuOverlay.visibility = View.GONE
+                menuOverlay.alpha = 1f
+            }.start()
         }
     }
 
-    private fun toggleMenu() = setMenuVisible(menuOverlay.visibility != View.VISIBLE)
+    private fun toggleMenu() = setMenuVisible(!menuOpen)
 
     // ---------------- 载入 ----------------
 
@@ -536,7 +548,10 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         if (chapters.isEmpty()) { toast("未识别到章节"); return }
         val labels = Array(chapters.size) { i ->
             val mark = if (i == chapterIndex) "▶ " else "　 "
-            "$mark${i + 1}. ${chapters[i].title}"
+            // 章节名自带「第 2 节」「第三章」时不再补序号，避免「2. 第 2 节」
+            val title = chapters[i].title
+            val numbered = NUMBERED_HEADING.containsMatchIn(title) || PLAIN_INDEX.containsMatchIn(title)
+            "$mark" + if (numbered) title else "${i + 1}. $title"
         }
         showListDialog("目录（${chapters.size} 章）", labels, initialSelection = chapterIndex) { which ->
             openChapter(which, chapters[which].start)
@@ -656,8 +671,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 val title = chapters.getOrNull(hit.chapter)?.title ?: ""
                 val head = "$title \u27E9 "
                 val ss = SpannableString(head + hit.preview)
+                // 章节前缀降到 tertiary：一屏十几个金色前缀会把真正要看的命中词淹掉
                 ss.setSpan(
-                    ForegroundColorSpan(getColor(R.color.accent)),
+                    ForegroundColorSpan(getColor(R.color.text_tertiary)),
                     0, head.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                 )
                 val hl = head.length + hit.hitFrom
@@ -767,13 +783,58 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             parent.addView(TextView(this).apply {
                 text = t
                 setTextColor(getColor(R.color.accent))
-                textSize = 12f
-                setPadding(0, (8 * d).toInt(), 0, (4 * d).toInt())
+                textSize = 13f
+                setPadding(0, (14 * d).toInt(), 0, (6 * d).toInt())
             })
         }
 
         // 记住第一个可聚焦控件，面板弹出时把焦点给它，手柄一进来就能直接调
         var firstFocusable: View? = null
+
+        /**
+         * 「左标签 + 右状态」行：开关、主题、按键折叠共用一套视觉，
+         * 状态色只在有值/可展开时用金色，关闭态降到 faint，一眼看出当前状态。
+         */
+        fun actionRow(parent: LinearLayout, label: String, state: String,
+                      onActivate: (TextView) -> Unit): Pair<View, TextView> {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding((8 * d).toInt(), (5 * d).toInt(), (8 * d).toInt(), (5 * d).toInt())
+                isClickable = true
+                isFocusable = true
+                isFocusableInTouchMode = true
+            }
+            row.addView(TextView(this).apply {
+                text = label
+                setTextColor(getColor(R.color.text_secondary))
+                textSize = 12f
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val stateTv = TextView(this).apply {
+                text = state
+                setTextColor(getColor(R.color.accent))
+                textSize = 12f
+            }
+            row.addView(stateTv)
+            row.setOnClickListener { onActivate(stateTv) }
+            row.setOnFocusChangeListener { v, hasFocus ->
+                v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
+            }
+            // 手柄 A 在系统里不是 ENTER，Dialog 里也没人帮忙转成点击，得自己处理
+            row.setOnKeyListener { _, keyCode, event ->
+                if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                when (keyCode) {
+                    KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        row.performClick(); true
+                    }
+                    else -> false
+                }
+            }
+            parent.addView(row)
+            return row to stateTv
+        }
 
         fun slider(parent: LinearLayout, label: String, min: Int, max: Int, value: Int,
                    suffix: String, onCommit: (Int) -> Unit) {
@@ -791,6 +852,11 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 progress = (value - min).coerceIn(0, max - min)
                 isFocusable = true
                 isFocusableInTouchMode = true
+                // 不设 tint 会吃 Material3 默认的紫色：滑块是全 app 唯一的原生控件色，
+                // 和金色体系差得最远，这里按 accent/line 定档
+                progressTintList = ColorStateList.valueOf(getColor(R.color.accent))
+                progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.line))
+                thumbTintList = ColorStateList.valueOf(getColor(R.color.accent))
             }
             var latest = value
             sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -823,8 +889,9 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                 handler.postDelayed(commit, 300)
                 true
             }
-            sb.setOnFocusChangeListener { v, hasFocus ->
-                v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
+            // 焦点底给整行：只包 SeekBar 时会在行中间浮出一块色带，和开关行对不齐
+            sb.setOnFocusChangeListener { _, hasFocus ->
+                row.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
             }
             if (firstFocusable == null) firstFocusable = sb
             row.addView(tv, LinearLayout.LayoutParams((96 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -834,36 +901,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
 
         fun toggle(parent: LinearLayout, label: String, initial: Boolean, onChange: (Boolean) -> Unit) {
             var state = initial
-            val tv = TextView(this).apply {
-                text = "$label：" + if (state) "开" else "关"
-                setTextColor(getColor(R.color.text_secondary))
-                textSize = 12f
-                setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt())
-                isClickable = true
-                isFocusable = true
-                isFocusableInTouchMode = true
-                setOnClickListener {
-                    state = !state
-                    text = "$label：" + if (state) "开" else "关"
-                    onChange(state)
-                }
-                setOnFocusChangeListener { v, hasFocus ->
-                    v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
-                }
-                // 手柄 A 在系统里不是 ENTER，Dialog 里也没人帮忙转成点击，得自己处理
-                setOnKeyListener { _, keyCode, event ->
-                    if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                    when (keyCode) {
-                        KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            performClick(); true
-                        }
-                        else -> false
-                    }
-                }
+            val (_, stateTv) = actionRow(parent, label, if (state) "开" else "关") { tv ->
+                state = !state
+                tv.text = if (state) "开" else "关"
+                tv.setTextColor(getColor(if (state) R.color.accent else R.color.text_faint))
+                onChange(state)
             }
-            parent.addView(tv)
+            if (!state) stateTv.setTextColor(getColor(R.color.text_faint))
         }
 
         title(left, "排版")
@@ -889,6 +933,12 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         toggle(right, "音量键翻页", settings.volumeKeyTurn) { on ->
             applySettings(settings.copy(volumeKeyTurn = on))
         }
+        // 主题循环原先只藏在菜单的「纸白」按钮里，用户根本不知道那个按钮能点
+        actionRow(right, "阅读主题", settings.theme.label) { tv ->
+            val list = ReaderTheme.entries
+            applyTheme(list[(list.indexOf(settings.theme) + 1) % list.size])
+            tv.text = settings.theme.label
+        }
 
         title(right, "跳转")
         val jumpRow = LinearLayout(this).apply {
@@ -906,8 +956,11 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             progress = (pageView.overallPercent * 1000).toInt().coerceIn(0, 1000)
             isFocusable = true
             isFocusableInTouchMode = true
-            setOnFocusChangeListener { v, hasFocus ->
-                v.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
+            progressTintList = ColorStateList.valueOf(getColor(R.color.accent))
+            progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.line))
+            thumbTintList = ColorStateList.valueOf(getColor(R.color.accent))
+            setOnFocusChangeListener { _, hasFocus ->
+                jumpRow.setBackgroundColor(if (hasFocus) getColor(R.color.accent_focus_bg) else 0x00000000)
             }
         }
         jumpSb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -919,8 +972,13 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
         jumpRow.addView(jumpSb, LinearLayout.LayoutParams(0, (30 * d).toInt(), 1f))
         right.addView(jumpRow)
 
-        // ---- 按键 ----
-        title(right, "按键（方向键选中后按 A 改绑，B 取消）")
+        // ---- 按键（默认收起：10 行映射常驻会把设置面板撑成两屏）----
+        title(right, "按键")
+        val keyBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        var keysExpanded = false
         val keyRows = LinkedHashMap<Gamepad.Action, TextView>()
         var capturing: Gamepad.Action? = null
 
@@ -938,7 +996,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             val tv = TextView(this).apply {
                 textSize = 12f
                 setTextColor(getColor(R.color.text_secondary))
-                setPadding((8 * d).toInt(), (7 * d).toInt(), (8 * d).toInt(), (7 * d).toInt())
+                setPadding((8 * d).toInt(), (5 * d).toInt(), (8 * d).toInt(), (5 * d).toInt())
                 isFocusable = true
                 isFocusableInTouchMode = true
                 setOnFocusChangeListener { v, hasFocus ->
@@ -950,12 +1008,28 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
                     toast("按下要绑定的键，B 取消")
                 }
             }
-            right.addView(tv)
+            keyBox.addView(tv)
             keyRows[action] = tv
         }
 
         for (action in Keymap.BINDABLE) keyRow(action)
         refreshKeyRows()
+
+        var keyToggleRow: View? = null
+        val (toggleRow, _) = actionRow(right, "按键映射", "展开") { tv ->
+            keysExpanded = !keysExpanded
+            keyBox.visibility = if (keysExpanded) View.VISIBLE else View.GONE
+            tv.text = if (keysExpanded) "收起" else "展开"
+            if (!keysExpanded) keyToggleRow?.requestFocus()
+        }
+        keyToggleRow = toggleRow
+        keyBox.addView(TextView(this).apply {
+            text = "方向键选中后按 A 改绑，B 取消"
+            setTextColor(getColor(R.color.text_tertiary))
+            textSize = 10.5f
+            setPadding((8 * d).toInt(), 0, 0, (4 * d).toInt())
+        }, 0)
+        right.addView(keyBox)
 
         val dlg = Dialog(this)
         // Dialog 有独立的 window，Activity 的按键逻辑进不来：
@@ -1024,7 +1098,8 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             }
             val scroller = ScrollView(this).apply {
                 isFillViewport = true
-                isVerticalScrollBarEnabled = true
+                // 系统默认滚动条是一条亮色细条，和深色面板差得太远，滚动位置靠内容本身感知
+                isVerticalScrollBarEnabled = false
             }
             scroller.addView(root, android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -1201,7 +1276,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             return super.dispatchKeyEvent(event)
         }
 
-        if (menuOverlay.visibility == View.VISIBLE) {
+        if (menuOpen) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER -> {
@@ -1276,7 +1351,7 @@ class ReaderActivity : AppCompatActivity(), PageView.Listener {
             Gamepad.Action.FONT_DOWN -> changeFont(-1f, fromRepeat)
             Gamepad.Action.FONT_UP -> changeFont(1f, fromRepeat)
             Gamepad.Action.BACK -> {
-                if (menuOverlay.visibility == View.VISIBLE) setMenuVisible(false) else requestExit()
+                if (menuOpen) setMenuVisible(false) else requestExit()
             }
         }
         return true

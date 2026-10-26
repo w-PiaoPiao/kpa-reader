@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 封面底部书名条：压一层 72% 黑，保证白字在任何封面上都读得出来 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#B8000000" />
+</shape>

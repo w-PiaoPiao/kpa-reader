@@ -84,6 +84,7 @@ class ShelfAdapter(
             if (b.finished || b.progressPercent >= 1f) View.VISIBLE else View.GONE
 
         bindCover(holder, b)
+        holder.cardTitle.text = b.title
 
         holder.cardBox.setOnClickListener { onClick(b) }
         holder.cardBox.setOnLongClickListener {
@@ -128,10 +129,12 @@ class ShelfAdapter(
     }
 
     companion object {
-        // 选中/非选中的对比要拉满，3.5 寸屏上一眼看出焦点在哪本
-        private const val SEL_SCALE = 1.1f
-        private const val IDLE_SCALE = 0.9f
-        private const val IDLE_ALPHA = 0.8f
+        // 选中/非选中的对比要拉满，3.5 寸屏上一眼看出焦点在哪本。
+        // 但 0.8 的 alpha 会把封面整体拉灰、1.1/0.9 的缩放差也太跳，
+        // 收到 0.92 与 1.06/0.96 后仍然一眼分得清，邻卡也不显脏
+        private const val SEL_SCALE = 1.06f
+        private const val IDLE_SCALE = 0.96f
+        private const val IDLE_ALPHA = 0.92f
         private const val SEL_Z = 8f
     }
 
@@ -142,6 +145,7 @@ class ShelfAdapter(
         val coverBox: View = v.findViewById(R.id.coverBox)
         val cover: ImageView = v.findViewById(R.id.ivCover)
         val placeholder: TextView = v.findViewById(R.id.tvCoverPlaceholder)
+        val cardTitle: TextView = v.findViewById(R.id.tvCardTitle)
         val badgeContinue: TextView = v.findViewById(R.id.tvBadgeContinue)
         val badgeDone: TextView = v.findViewById(R.id.tvBadgeDone)
     }

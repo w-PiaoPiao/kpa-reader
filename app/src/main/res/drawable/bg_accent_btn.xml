@@ -6,14 +6,14 @@
             <!-- 十字键上键会从卡片行跳到顶栏按钮，焦点态要有白描边才看得见 -->
             <item android:state_focused="true">
                 <shape android:shape="rectangle">
-                    <corners android:radius="7dp" />
+                    <corners android:radius="8dp" />
                     <solid android:color="@color/accent_bright" />
                     <stroke android:width="2dp" android:color="@color/stroke_focused" />
                 </shape>
             </item>
             <item>
                 <shape android:shape="rectangle">
-                    <corners android:radius="7dp" />
+                    <corners android:radius="8dp" />
                     <solid android:color="@color/accent" />
                 </shape>
             </item>

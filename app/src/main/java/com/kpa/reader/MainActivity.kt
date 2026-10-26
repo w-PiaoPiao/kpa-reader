@@ -65,7 +65,11 @@ class MainActivity : AppCompatActivity() {
     private val dateFmt = SimpleDateFormat("MM-dd", Locale.getDefault())
 
     /** 书架排序。切换存 SharedPreferences，跨启动记住 */
-    private enum class Sort(val label: String) { LAST_READ("最近阅读"), ADDED("加入时间"), TITLE("书名") }
+    private enum class Sort(val label: String, val shortLabel: String) {
+        LAST_READ("最近阅读", "最近"),
+        ADDED("加入时间", "加入"),
+        TITLE("书名", "书名")
+    }
     private var sort = Sort.LAST_READ
 
     private val clockHandler = Handler(Looper.getMainLooper())
@@ -172,7 +176,7 @@ class MainActivity : AppCompatActivity() {
         emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
         infoPanel.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
         hintBar.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
-        findViewById<TextView>(R.id.tvLibCount).text = "LIBRARY · ${list.size} 本"
+        findViewById<TextView>(R.id.tvLibCount).text = "共 ${list.size} 本"
         if (list.isEmpty()) {
             updatePanel(null, 0, 0)
             return
@@ -201,7 +205,7 @@ class MainActivity : AppCompatActivity() {
         list.indexOfFirst { !it.finished && it.progressPercent < 1f && it.lastReadAt > 0 }
 
     private fun updateSortLabel() {
-        findViewById<TextView>(R.id.btnSort).text = "排序·${sort.label}"
+        findViewById<TextView>(R.id.btnSort).text = "排序·${sort.shortLabel}"
     }
 
     private fun cycleSort() {
@@ -244,15 +248,15 @@ class MainActivity : AppCompatActivity() {
         pbPanel.progress = (b.progressPercent * 1000).toInt().coerceIn(0, 1000)
     }
 
-    /** 顶栏电量 + 时间。掌机沉浸模式没有系统状态栏，书库页自己显示 */
+    /** 顶栏电量 + 时间。掌机沉浸模式没有系统状态栏，书库页自己显示；
+     *  合成一条「86% · 20:07」，比两个 TextView 各占一段更紧凑 */
     private fun updateStatus() {
-        findViewById<TextView>(R.id.tvClock).text =
-            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
         val bat = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = bat?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = bat?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
         val pct = if (level >= 0 && scale > 0) level * 100 / scale else -1
-        findViewById<TextView>(R.id.tvBattery).text = if (pct >= 0) "$pct%" else ""
+        findViewById<TextView>(R.id.tvClock).text = if (pct >= 0) "$pct% · $time" else time
     }
 
     private fun focusedBook(): Book? {

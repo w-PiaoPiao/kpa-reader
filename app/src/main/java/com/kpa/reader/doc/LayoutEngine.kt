@@ -33,17 +33,17 @@ class LayoutEngine(
 ) {
 
     private val body = TextPaint(bodyPaint)
+    // H1 保留粗体（章节大标题需要重量），H2/H3 只靠字号和段前距拉开层级 ——
+    // 中文衬线上 isFakeBoldText 是描边模拟，边缘会发毛
     private val h1Paint = TextPaint(body).apply {
-        textSize = body.textSize * 1.42f
+        textSize = body.textSize * 1.5f
         isFakeBoldText = true
     }
     private val h2Paint = TextPaint(body).apply {
-        textSize = body.textSize * 1.22f
-        isFakeBoldText = true
+        textSize = body.textSize * 1.28f
     }
     private val h3Paint = TextPaint(body).apply {
-        textSize = body.textSize * 1.08f
-        isFakeBoldText = true
+        textSize = body.textSize * 1.12f
     }
     private val quotePaint = TextPaint(body).apply {
         alpha = (bodyPaint.alpha * 0.82f).toInt().coerceIn(0, 255)
@@ -82,14 +82,14 @@ class LayoutEngine(
 
     private fun gapBefore(style: Int): Float = when (style) {
         Block.H1 -> body.textSize * 0.7f
-        Block.H2 -> body.textSize * 0.55f
-        Block.H3 -> body.textSize * 0.4f
+        Block.H2 -> body.textSize * 0.62f
+        Block.H3 -> body.textSize * 0.46f
         else -> paraSpacingPx
     }
 
     private fun gapAfter(style: Int): Float = when (style) {
         Block.H1 -> body.textSize * 0.5f
-        Block.H2 -> body.textSize * 0.35f
+        Block.H2 -> body.textSize * 0.4f
         else -> 0f
     }
 

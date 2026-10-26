@@ -53,6 +53,22 @@
                 android:max="1000"
                 android:progressBackgroundTint="@color/line"
                 android:progressTint="@color/progress" />
+
+            <!-- 书名压在封面底部：一排纯封面时中文书名几乎认不出是哪本，
+                 焦点卡才在底部面板显示书名太晚 -->
+            <TextView
+                android:id="@+id/tvCardTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_cover_title"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="3dp"
+                android:textColor="@color/text_primary"
+                android:textSize="10.5sp" />
         </FrameLayout>
 
         <TextView

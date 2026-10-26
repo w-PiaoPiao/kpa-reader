@@ -43,6 +43,6 @@
     <color name="progress">#FF7C9CFF</color>
     <color name="highlight">#FFE8623C</color>
 
-    <!-- 封面占位首字：30% 白 -->
-    <color name="cover_placeholder">#5FFFFFFF</color>
+    <!-- 封面占位首字：60% 白。30% 在六种中低明度底上只有 2.8:1，字会糊掉 -->
+    <color name="cover_placeholder">#99FFFFFF</color>
 </resources>

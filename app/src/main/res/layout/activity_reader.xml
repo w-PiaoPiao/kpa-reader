@@ -111,22 +111,12 @@
             <TextView
                 android:id="@+id/btnBookmark"
                 style="@style/ToolButton"
-                android:text="＋书签" />
+                android:text="加签" />
 
             <TextView
                 android:id="@+id/btnBookmarks"
                 style="@style/ToolButton"
-                android:text="书签列表" />
-
-            <TextView
-                android:id="@+id/btnFontDown"
-                style="@style/ToolButton"
-                android:text="A-" />
-
-            <TextView
-                android:id="@+id/btnFontUp"
-                style="@style/ToolButton"
-                android:text="A+" />
+                android:text="书签" />
 
             <TextView
                 android:id="@+id/btnTheme"
@@ -175,7 +165,7 @@
             android:id="@+id/searchInput"
             android:layout_width="match_parent"
             android:layout_height="42dp"
-            android:background="@color/bg_input"
+            android:background="@drawable/bg_input_field"
             android:hint="输入关键词，边打边搜"
             android:paddingHorizontal="12dp"
             android:singleLine="true"

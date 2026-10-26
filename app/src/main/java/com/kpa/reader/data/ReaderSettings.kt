@@ -14,10 +14,12 @@ enum class ReaderTheme(
     val sub: Int,
     val accent: Int
 ) {
-    PAPER("paper", "纸白", 0xFFF7F1E0.toInt(), 0xFF2C2A25.toInt(), 0xFF8A8474.toInt(), 0xFFB4763A.toInt()),
-    EYE("eye", "护眼", 0xFFCCE8CF.toInt(), 0xFF22331F.toInt(), 0xFF5C7A5A.toInt(), 0xFF2F7A46.toInt()),
-    NIGHT("night", "夜间", 0xFF11141A.toInt(), 0xFF9FA9B6.toInt(), 0xFF4C5867.toInt(), 0xFF6FA8DC.toInt()),
-    BLACK("black", "纯黑", 0xFF000000.toInt(), 0xFF8C8C8C.toInt(), 0xFF3A3A3A.toInt(), 0xFF5A8FC4.toInt());
+    // sub 是页眉页脚/电量这类 11sp 小字，四套主题都按 ≥4.5:1 对比度定档；
+    // 原先纸白 3.3:1、夜间 2.5:1，小字在实机上糊成一片
+    PAPER("paper", "纸白", 0xFFF7F1E0.toInt(), 0xFF2C2A25.toInt(), 0xFF6B6656.toInt(), 0xFFB4763A.toInt()),
+    EYE("eye", "护眼", 0xFFCCE8CF.toInt(), 0xFF22331F.toInt(), 0xFF46664A.toInt(), 0xFF2F7A46.toInt()),
+    NIGHT("night", "夜间", 0xFF11141A.toInt(), 0xFF9FA9B6.toInt(), 0xFF7C8899.toInt(), 0xFF6FA8DC.toInt()),
+    BLACK("black", "纯黑", 0xFF000000.toInt(), 0xFF8C8C8C.toInt(), 0xFF7A7A7A.toInt(), 0xFF5A8FC4.toInt());
 
     companion object {
         fun of(key: String?): ReaderTheme = entries.firstOrNull { it.key == key } ?: PAPER

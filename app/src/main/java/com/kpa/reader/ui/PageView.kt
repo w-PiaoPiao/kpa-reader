@@ -19,6 +19,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.animation.DecelerateInterpolator
 import com.kpa.reader.data.ReaderSettings
+import com.kpa.reader.doc.Block
 import com.kpa.reader.doc.Document
 import com.kpa.reader.doc.LayoutEngine
 import kotlinx.coroutines.CoroutineScope
@@ -167,7 +168,8 @@ class PageView @JvmOverloads constructor(
         paint.textSize = settings.fontSizeSp * scaledDensity
         paint.color = settings.theme.fg
         chromePaint.typeface = Typeface.SANS_SERIF
-        chromePaint.textSize = 10.5f * scaledDensity
+        // 11sp：10.5sp 在 3.5 寸屏上已经接近可读下限，页眉页脚又只用低对比度色
+        chromePaint.textSize = 11f * scaledDensity
         chromePaint.color = settings.theme.sub
         batteryPaint.color = settings.theme.sub
         placeholderPaint.color = settings.theme.sub
@@ -499,7 +501,8 @@ class PageView @JvmOverloads constructor(
         if (!settings.showStatusBar) return
         val maxW = (width - padH * 2).toFloat()
         val headerBase = (settings.padVdp * density) + chromePaint.textSize
-        if (chapterLabel.isNotEmpty()) {
+        // 章首页正文第一项本身就是标题时，页眉再画一遍就是同一行字出现两次
+        if (chapterLabel.isNotEmpty() && !headingOnThisPage()) {
             canvas.drawText(ellipsizeCached(chapterLabel, maxW), padH.toFloat(), headerBase, chromePaint)
         }
         val footerY = height - (settings.padVdp * density) - chromePaint.textSize * 0.25f
@@ -511,7 +514,7 @@ class PageView @JvmOverloads constructor(
         canvas.drawText(pctText, width - padH - pctW, footerY, chromePaint)
 
         if (batteryPct in 0..100) {
-            val batRight = width - padH - pctW - 10 * density
+            val batRight = width - padH - pctW - 12 * density
             drawBattery(canvas, batRight, footerY - chromePaint.textSize * 0.18f)
         }
 
@@ -555,8 +558,7 @@ class PageView @JvmOverloads constructor(
         }
     }
 
-    private fun ellipsize(text: String, maxWidth: Float): String {
-        if (chromePaint.measureText(text) <= maxWidth) return text
+    private fun ellipsize(text: String, maxWidth: Float): String {        if (chromePaint.measureText(text) <= maxWidth) return text
         var t = text
         while (t.length > 2 && chromePaint.measureText("$t…") > maxWidth) {
             t = t.substring(0, t.length - 1)
@@ -583,6 +585,13 @@ class PageView @JvmOverloads constructor(
         chromePctText = pct
         chromePctW = w
         return w
+    }
+
+    /** 章首页首项是标题块（H1/H2/H3）时，正文已经显示了标题，页眉让位 */
+    private fun headingOnThisPage(): Boolean {
+        if (pageIndex != 0) return false
+        val first = pages.firstOrNull()?.items?.firstOrNull() as? LayoutEngine.Item.TextSeg ?: return false
+        return first.style != Block.BODY && first.style != Block.QUOTE
     }
 
     // ---------------- 图片 ----------------
